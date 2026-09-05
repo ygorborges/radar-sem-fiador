@@ -45,4 +45,4 @@ Os arquivos gerados (`historico_anuncios.json`, `resultados_idealista.json`, `sc
 
 ## Licença
 
-MIT — veja [LICENSE](LICENSE).
+[PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) — veja [LICENSE](LICENSE). Livre pra uso não-comercial; me procure pra qualquer uso comercial.
