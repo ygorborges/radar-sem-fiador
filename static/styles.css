@@ -90,11 +90,14 @@ body {
 .scrape-status.done { color: var(--green-text); }
 .scrape-status.error { color: #b91c1c; }
 
-select, button, input[type="text"] {
+select, button, input[type="text"], input[type="number"] {
   padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid var(--line);
   font-size: 14px;
+}
+.price-input {
+  width: 90px;
 }
 button {
   background: var(--gray);

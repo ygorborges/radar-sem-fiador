@@ -2,6 +2,8 @@ const els = {
   statusFilter: document.getElementById('statusFilter'),
   tipologiaFilter: document.getElementById('tipologiaFilter'),
   anuncianteFilter: document.getElementById('anuncianteFilter'),
+  precoMinFilter: document.getElementById('precoMinFilter'),
+  precoMaxFilter: document.getElementById('precoMaxFilter'),
   sortOrder: document.getElementById('sortOrder'),
   favoritosOnly: document.getElementById('favoritosOnlyFilter'),
   summary: document.getElementById('summary'),
@@ -51,17 +53,40 @@ function formatarData(isoDate) {
   return `${dia}/${mes}/${ano}`;
 }
 
+function parsePreco(precoStr) {
+  if (!precoStr) return null;
+  const match = precoStr.match(/[\d.,]+/);
+  if (!match) return null;
+
+  // Formato português: "." separa milhares, "," separa decimais.
+  let numStr = match[0];
+  numStr = numStr.includes(',') ? numStr.replace(/\./g, '').replace(',', '.') : numStr.replace(/\./g, '');
+
+  const valor = parseFloat(numStr);
+  return Number.isFinite(valor) ? valor : null;
+}
+
 function applyFilters(data) {
   const statusSelected = els.statusFilter.value || 'todos';
   const tipologiaSelected = els.tipologiaFilter.value || 'todas';
   const anuncianteSelected = els.anuncianteFilter.value || 'todos';
   const favoritosOnly = els.favoritosOnly.checked;
+  const precoMin = els.precoMinFilter.value !== '' ? parseFloat(els.precoMinFilter.value) : null;
+  const precoMax = els.precoMaxFilter.value !== '' ? parseFloat(els.precoMaxFilter.value) : null;
 
   return data.filter(item => {
     if (statusSelected !== 'todos' && item.status !== statusSelected) return false;
     if (tipologiaSelected !== 'todas' && normalizarTipologia(item.tipologia) !== tipologiaSelected) return false;
     if (anuncianteSelected !== 'todos' && (item.tipo_anunciante || 'Desconhecido') !== anuncianteSelected) return false;
     if (favoritosOnly && !item.favorito) return false;
+    if (precoMin !== null || precoMax !== null) {
+      const precoNum = parsePreco(item.preco);
+      // Preço não identificado (ex.: "N/A") fica de fora quando o filtro de preço está ativo,
+      // já que não há como confirmar se ele está dentro da faixa escolhida.
+      if (precoNum === null) return false;
+      if (precoMin !== null && precoNum < precoMin) return false;
+      if (precoMax !== null && precoNum > precoMax) return false;
+    }
     return true;
   });
 }
@@ -234,6 +259,8 @@ async function runScraper() {
 els.statusFilter.addEventListener('change', render);
 els.tipologiaFilter.addEventListener('change', render);
 els.anuncianteFilter.addEventListener('change', render);
+els.precoMinFilter.addEventListener('input', render);
+els.precoMaxFilter.addEventListener('input', render);
 els.sortOrder.addEventListener('change', render);
 els.favoritosOnly.addEventListener('change', render);
 els.refreshBtn.addEventListener('click', fetchResults);

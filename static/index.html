@@ -44,6 +44,12 @@
           <select id="anuncianteFilter"></select>
         </span>
         <span class="filter-group">
+          <label for="precoMinFilter">Preço (€):</label>
+          <input id="precoMinFilter" class="price-input" type="number" min="0" step="10" placeholder="mín." />
+          <span>–</span>
+          <input id="precoMaxFilter" class="price-input" type="number" min="0" step="10" placeholder="máx." />
+        </span>
+        <span class="filter-group">
           <label for="sortOrder">Ordenar por:</label>
           <select id="sortOrder">
             <option value="padrao">Padrão</option>
