@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Oportunidades Idealista</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>Oportunidades de arrendamento</h1>
+
+    <section class="panel">
+      <h2 class="panel-title">Configuração da busca</h2>
+      <div class="config-row">
+        <span class="config-label">URL padrão:</span>
+        <span id="urlDefault" class="url-default"></span>
+      </div>
+      <div class="config-row">
+        <label for="urlAtualInput" class="config-label">URL atual:</label>
+        <input id="urlAtualInput" type="text" class="url-input" />
+      </div>
+      <div class="config-actions">
+        <button id="saveUrlBtn" type="button">Guardar URL</button>
+        <button id="resetUrlBtn" type="button" class="secondary">Restaurar padrão</button>
+        <button id="runScraperBtn" type="button" class="primary">Executar scraper</button>
+      </div>
+      <div id="configMsg" class="config-msg"></div>
+      <div id="scrapeStatus" class="scrape-status idle"></div>
+    </section>
+
+    <div class="toolbar">
+      <div class="filters-row">
+        <label for="statusFilter">Filtrar por status de fiador:</label>
+        <select id="statusFilter"></select>
+        <label for="tipologiaFilter" style="margin-left: 12px;">Tipologia:</label>
+        <select id="tipologiaFilter"></select>
+        <label for="anuncianteFilter" style="margin-left: 12px;">Anunciante:</label>
+        <select id="anuncianteFilter"></select>
+        <label class="favoritos-only" style="margin-left: 12px;">
+          <input id="favoritosOnlyFilter" type="checkbox" />
+          Somente favoritos
+        </label>
+        <button id="refreshBtn" type="button">Atualizar</button>
+      </div>
+    </div>
+
+    <div id="summary" class="summary"></div>
+    <div id="results" class="cards"></div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

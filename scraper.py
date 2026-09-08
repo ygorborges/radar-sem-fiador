@@ -2,20 +2,9 @@ import asyncio
 import json
 import random
 import re
-import sys
-import webbrowser
-from datetime import datetime
-from pathlib import Path
 from playwright.async_api import async_playwright
 
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(exist_ok=True)
-HISTORICO_PATH = DATA_DIR / "historico_anuncios.json"
-RESULTADOS_PATH = DATA_DIR / "resultados_idealista.json"
-LOG_PATH = DATA_DIR / "scraper_log.txt"
-
-URL_BASE_DEFAULT = "https://www.idealista.pt/areas/arrendar-casas/com-preco-max_999,tamanho-min_60,apartamentos,t1,t2,t3,t4-t5,arrendamento-longa-duracao/?shape=%28%28_tdzFp%7Cxs%40goBglAaC%7BhFvz%40ceCbpBmEdyE%7Ci%40xPjzB%7DbAb%7C%40c%7BAlSkc%40vlDc_B%60%5D%29%29&ordem=precos-asc"
+from storage import URL_BASE_DEFAULT, Storage, default_storage
 
 TEMPO_ENTRE_PAGINAS = 3.0
 TEMPO_ENTRE_ANUNCIOS = 2.5
@@ -307,37 +296,6 @@ async def extrair_dados_detalhe(page):
 
     return titulo or "Imóvel", preco, descricao
 
-def carregar_historico() -> set[str]:
-    if not HISTORICO_PATH.exists():
-        return set()
-    try:
-        with HISTORICO_PATH.open("r", encoding="utf-8") as f:
-            dados = json.load(f)
-        if isinstance(dados, list):
-            return {str(item) for item in dados}
-    except Exception:
-        pass
-    return set()
-
-
-def guardar_historico(historico: set[str]) -> None:
-    with HISTORICO_PATH.open("w", encoding="utf-8") as f:
-        json.dump(sorted(historico), f, ensure_ascii=False, indent=2)
-
-
-def guardar_resultados(resultados: list[dict]) -> None:
-    with RESULTADOS_PATH.open("w", encoding="utf-8") as f:
-        json.dump(resultados, f, ensure_ascii=False, indent=2)
-
-
-def log_mensagem(mensagem: str) -> None:
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    linha = f"[{timestamp}] {mensagem}\n"
-    with LOG_PATH.open("a", encoding="utf-8") as f:
-        f.write(linha)
-    print(mensagem)
-
-
 async def extrair_proxima_pagina(page):
     seletores = [
         "a[rel='next']",
@@ -364,13 +322,14 @@ async def extrair_proxima_pagina(page):
     return None
 
 
-async def raspar_idealista_porto(url_base: str | None = None):
+async def raspar_idealista_porto(url_base: str | None = None, store: Storage | None = None, headless: bool = False):
     url_base = url_base or URL_BASE_DEFAULT
-    historico = carregar_historico()
+    store = store or default_storage
+    historico = store.carregar_historico()
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=False,
+            headless=headless,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-first-run",
@@ -396,16 +355,16 @@ async def raspar_idealista_porto(url_base: str | None = None):
         max_paginas = 20
 
         for pagina in range(1, max_paginas + 1):
-            log_mensagem(f"\n=== Página {pagina}: {url_atual} ===")
+            store.log_mensagem(f"\n=== Página {pagina}: {url_atual} ===")
             await page.goto(url_atual, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000)
 
             artigos = await page.query_selector_all("article.item")
-            log_mensagem(f"Total de imóveis na página: {len(artigos)}")
+            store.log_mensagem(f"Total de imóveis na página: {len(artigos)}")
 
             if pagina < max_paginas:
                 atraso = TEMPO_ENTRE_PAGINAS + random.uniform(0.2, 1.2)
-                log_mensagem(f"Aguardar {atraso:.1f}s antes da próxima página.")
+                store.log_mensagem(f"Aguardar {atraso:.1f}s antes da próxima página.")
                 await asyncio.sleep(atraso)
 
             for artigo in artigos:
@@ -418,7 +377,7 @@ async def raspar_idealista_porto(url_base: str | None = None):
 
             proxima_pagina = await extrair_proxima_pagina(page)
             if not proxima_pagina or proxima_pagina == url_atual:
-                log_mensagem("Sem mais páginas de resultados.")
+                store.log_mensagem("Sem mais páginas de resultados.")
                 break
 
             url_atual = proxima_pagina
@@ -426,14 +385,14 @@ async def raspar_idealista_porto(url_base: str | None = None):
         anuncios_filtrados = []
 
         for i, url in enumerate(links_imoveis, 1):
-            log_mensagem(f"[{i}/{len(links_imoveis)}] Analisando: {url}")
+            store.log_mensagem(f"[{i}/{len(links_imoveis)}] Analisando: {url}")
             historico.add(url)
-            guardar_historico(historico)
+            store.guardar_historico(historico)
 
             detalhe_page = await context.new_page()
             try:
                 atraso_antes_detalhe = TEMPO_ANTES_PROXIMA_PAGINA + random.uniform(0.2, 1.3)
-                log_mensagem(f"Aguardar {atraso_antes_detalhe:.1f}s antes do detalhe.")
+                store.log_mensagem(f"Aguardar {atraso_antes_detalhe:.1f}s antes do detalhe.")
                 await asyncio.sleep(atraso_antes_detalhe)
                 await detalhe_page.goto(url, wait_until="networkidle", timeout=20000)
 
@@ -442,9 +401,9 @@ async def raspar_idealista_porto(url_base: str | None = None):
                 passou_filtro, status_match, trecho_status = analisar_fiador(descricao_completa)
                 tipo_anunciante = extrair_tipo_anunciante(descricao_completa)
 
-                log_mensagem(f"  -> CLASSIFICADO [{status_match}] [{tipo_anunciante}]: {titulo}")
+                store.log_mensagem(f"  -> CLASSIFICADO [{status_match}] [{tipo_anunciante}]: {titulo}")
                 if trecho_status:
-                    log_mensagem(f"     Trecho: {trecho_status[:180]}")
+                    store.log_mensagem(f"     Trecho: {trecho_status[:180]}")
 
                 anuncios_filtrados.append({
                     "titulo": titulo,
@@ -459,44 +418,15 @@ async def raspar_idealista_porto(url_base: str | None = None):
                 })
 
             except Exception as e:
-                log_mensagem(f"  -> Erro ao processar imóvel: {e}")
+                store.log_mensagem(f"  -> Erro ao processar imóvel: {e}")
             finally:
                 await detalhe_page.close()
                 if i < len(links_imoveis):
                     pausa = TEMPO_ENTRE_ANUNCIOS + random.uniform(0.3, 1.5)
-                    log_mensagem(f"Pausa entre anúncios: {pausa:.1f}s")
+                    store.log_mensagem(f"Pausa entre anúncios: {pausa:.1f}s")
                     await asyncio.sleep(pausa)
 
-        guardar_resultados(anuncios_filtrados)
+        store.atualizar_resultados(anuncios_filtrados)
         await browser.close()
         return anuncios_filtrados
 
-async def main():
-    log_mensagem(f"Iniciando scraping em {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    resultados = await raspar_idealista_porto(URL_BASE_DEFAULT)
-    log_mensagem(f"\n--- Resultados Filtrados: {len(resultados)} ---\n")
-    for item in resultados:
-        log_mensagem(f"Status: {item['status']}")
-        log_mensagem(f"Imóvel: {item['titulo']}")
-        log_mensagem(f"Preço: {item['preco']}")
-        log_mensagem(f"Link: {item['link']}")
-        log_mensagem(f"Trecho: {item['descricao']}")
-        log_mensagem("-" * 50)
-
-    log_mensagem(f"\nHistórico salvo em: {HISTORICO_PATH}")
-    log_mensagem(f"Resultados exportados para: {RESULTADOS_PATH}")
-
-    log_mensagem("\n=== OPORTUNIDADES ENCONTRADAS ===")
-    if not resultados:
-        log_mensagem("Nenhuma oportunidade encontrada nesta varredura.")
-    else:
-        for idx, item in enumerate(resultados, start=1):
-            log_mensagem(f"\n[{idx}] {item['titulo']}")
-            log_mensagem(f"    Preço: {item['preco']}")
-            log_mensagem(f"    Status: {item['status']}")
-            log_mensagem(f"    Link: {item['link']}")
-
-    log_mensagem("\nProcesso concluído. Use a página web para consultar e filtrar os resultados.")
-
-if __name__ == "__main__":
-    asyncio.run(main())
