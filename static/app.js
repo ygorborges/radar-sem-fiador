@@ -2,6 +2,7 @@ const els = {
   statusFilter: document.getElementById('statusFilter'),
   tipologiaFilter: document.getElementById('tipologiaFilter'),
   anuncianteFilter: document.getElementById('anuncianteFilter'),
+  sortOrder: document.getElementById('sortOrder'),
   favoritosOnly: document.getElementById('favoritosOnlyFilter'),
   summary: document.getElementById('summary'),
   results: document.getElementById('results'),
@@ -43,6 +44,12 @@ function fillSelect(selectEl, values, allLabel, allValue) {
   selectEl.value = options.includes(selected) ? selected : allValue;
 }
 
+function formatarData(isoDate) {
+  if (!isoDate) return 'Data desconhecida';
+  const [ano, mes, dia] = isoDate.split('-');
+  return `${dia}/${mes}/${ano}`;
+}
+
 function applyFilters(data) {
   const statusSelected = els.statusFilter.value || 'todos';
   const tipologiaSelected = els.tipologiaFilter.value || 'todas';
@@ -58,8 +65,22 @@ function applyFilters(data) {
   });
 }
 
+function applySort(data) {
+  const ordem = els.sortOrder.value || 'padrao';
+  if (ordem === 'padrao') return data;
+
+  const direcao = ordem === 'data_desc' ? -1 : 1;
+  return [...data].sort((a, b) => {
+    // Anúncios sem data de atualização vão sempre para o fim, independente da direção.
+    if (!a.data_atualizacao && !b.data_atualizacao) return 0;
+    if (!a.data_atualizacao) return 1;
+    if (!b.data_atualizacao) return -1;
+    return a.data_atualizacao < b.data_atualizacao ? -direcao : direcao;
+  });
+}
+
 function render() {
-  const filtered = applyFilters(cachedData);
+  const filtered = applySort(applyFilters(cachedData));
   els.summary.textContent = `${filtered.length} anúncio(s) encontrado(s)`;
 
   if (!filtered.length) {
@@ -79,6 +100,7 @@ function render() {
       <div class="meta"><strong>Tipologia:</strong> ${item.tipologia || 'Indefinida'}</div>
       <div class="meta"><strong>Anunciante:</strong> ${item.tipo_anunciante || 'Desconhecido'}</div>
       <div class="meta"><strong>Preço:</strong> ${item.preco}</div>
+      <div class="meta"><strong>Atualizado em:</strong> ${formatarData(item.data_atualizacao)}</div>
       <div class="meta"><strong>Link:</strong> <a href="${item.link}" target="_blank" rel="noreferrer">Abrir anúncio</a></div>
       <div class="meta"><strong>Trecho decisivo:</strong> ${item.trecho_status || 'Sem trecho identificado'}</div>
       <div class="descricao">${item.descricao}</div>
@@ -193,6 +215,7 @@ async function runScraper() {
 els.statusFilter.addEventListener('change', render);
 els.tipologiaFilter.addEventListener('change', render);
 els.anuncianteFilter.addEventListener('change', render);
+els.sortOrder.addEventListener('change', render);
 els.favoritosOnly.addEventListener('change', render);
 els.refreshBtn.addEventListener('click', fetchResults);
 els.saveUrlBtn.addEventListener('click', saveUrl);

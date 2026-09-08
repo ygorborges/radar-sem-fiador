@@ -15,8 +15,8 @@ A aplicação roda num **único processo Python** (`app.py`, Flask): ele serve a
    - **SEM MENÇÃO** — a palavra "fiador" nem aparece no texto.
    - **EXIGE FIADOR** — o texto menciona fiador como exigência.
    - **BLOQUEADO_POR_ANTI_BOT** — a página caiu em proteção anti-bot (Cloudflare, captcha, etc.) e não pôde ser lida.
-4. Salva tudo em `data/resultados_idealista.json`.
-5. A interface consome esses dados via API (`/api/results`), com filtros por status, tipologia, tipo de anunciante e **favoritos**.
+4. Salva tudo em `data/resultados_idealista.json`, incluindo a **data de atualização** do anúncio (lida do bloco "Anúncio atualizado no dia..." da própria página do idealista — é a única data que o site expõe; não há campo separado de "data de publicação").
+5. A interface consome esses dados via API (`/api/results`), com filtros por status, tipologia, tipo de anunciante e **favoritos**, além de ordenação por data de atualização (mais recente/mais antiga primeiro).
 
 ## Arquitetura
 
@@ -64,6 +64,7 @@ Abra `http://127.0.0.1:8000/`. Na interface:
 - **Configuração da busca**: ajuste a "URL atual" (localização, preço, tipologia, etc. — cole aqui a URL de uma busca no idealista.pt) e clique em **Guardar URL**. A "URL padrão" nunca é sobrescrita; use **Restaurar padrão** para voltar a ela a qualquer momento.
 - **Executar scraper**: dispara a varredura com a URL atual configurada. O botão fica desativado enquanto a execução está em curso e a interface faz polling do estado (`/api/scrape/status`) até concluir, recarregando os resultados automaticamente.
 - **Favoritar**: cada anúncio tem um botão ★/☆ para marcar/desmarcar como favorito. Use o filtro "Somente favoritos" para ver só os marcados.
+- **Ordenar por**: escolha "Data de atualização (mais recente)" ou "(mais antiga)" para reordenar os cards; anúncios sem data identificada (raro, quando o site não expõe o bloco de estatísticas) ficam sempre no fim da lista.
 
 Os arquivos gerados (`historico_anuncios.json`, `resultados_idealista.json`, `config.json`, `favoritos.json`, `scraper_log.txt`) ficam em `data/` e não são versionados.
 
@@ -74,7 +75,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-- `tests/unit/test_scraper_parsing.py` — funções puras de classificação de texto (fiador, tipologia, tipo de anunciante, bloqueio anti-bot).
+- `tests/unit/test_scraper_parsing.py` — funções puras de classificação de texto (fiador, tipologia, tipo de anunciante, bloqueio anti-bot, data de atualização).
 - `tests/unit/test_storage.py` — persistência de histórico, resultados, configuração e favoritos, isolada em pastas temporárias.
 - `tests/unit/test_scrape_runner.py` — orquestração da execução em segundo plano (sucesso, erro, e bloqueio de execuções concorrentes), usando um coroutine falso no lugar do Playwright real.
 - `tests/integration/test_api.py` — todas as rotas da API Flask via test client, incluindo o fluxo completo de configurar URL, favoritar e disparar/concluir um scrape simulado.

@@ -2,6 +2,7 @@ import asyncio
 import json
 import random
 import re
+from datetime import date
 from playwright.async_api import async_playwright
 
 from storage import URL_BASE_DEFAULT, Storage, default_storage
@@ -9,6 +10,12 @@ from storage import URL_BASE_DEFAULT, Storage, default_storage
 TEMPO_ENTRE_PAGINAS = 3.0
 TEMPO_ENTRE_ANUNCIOS = 2.5
 TEMPO_ANTES_PROXIMA_PAGINA = 1.5
+
+MESES_PT = {
+    "janeiro": 1, "fevereiro": 2, "março": 3, "marco": 3, "abril": 4, "maio": 5,
+    "junho": 6, "julho": 7, "agosto": 8, "setembro": 9, "outubro": 10,
+    "novembro": 11, "dezembro": 12,
+}
 
 PADROES_EXPLICITOS = [
     r"sem fiador",
@@ -136,6 +143,43 @@ def extrair_trecho_status(texto: str, padrao: str | None = None) -> str | None:
     inicio = max(0, match.start() - 90)
     fim = min(len(texto_normalizado), match.end() + 220)
     return texto_normalizado[inicio:fim].strip()
+
+
+def extrair_data_atualizacao(texto: str | None, hoje: date | None = None) -> str | None:
+    """Converte "Anúncio atualizado no dia 14 de Agosto" em "2026-08-14".
+
+    O idealista não indica o ano nesse texto, então assume-se o ano corrente;
+    se a data resultante cair no futuro (ex.: a virada do ano, analisando em
+    janeiro um anúncio atualizado em dezembro), assume-se o ano anterior.
+    """
+    if not texto or not texto.strip():
+        return None
+
+    match = re.search(
+        r"atualizad[oa]\s+no\s+dia\s+(\d{1,2})\s+de\s+([A-Za-zÀ-ÿ]+)",
+        texto,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    mes = MESES_PT.get(match.group(2).strip().lower())
+    if not mes:
+        return None
+
+    hoje = hoje or date.today()
+    try:
+        data = date(hoje.year, mes, int(match.group(1)))
+    except ValueError:
+        return None
+
+    if data > hoje:
+        try:
+            data = date(hoje.year - 1, mes, int(match.group(1)))
+        except ValueError:
+            return None
+
+    return data.isoformat()
 
 
 def detectar_bloqueio_idealista(texto: str) -> bool:
@@ -296,6 +340,17 @@ async def extrair_dados_detalhe(page):
 
     return titulo or "Imóvel", preco, descricao
 
+
+async def extrair_data_atualizacao_pagina(page) -> str | None:
+    """Lê o bloco de estatísticas do anúncio, que carrega de forma assíncrona."""
+    try:
+        el = await page.wait_for_selector(".stats-text", timeout=5000)
+        texto = (await el.inner_text()).strip()
+    except Exception:
+        texto = None
+    return extrair_data_atualizacao(texto)
+
+
 async def extrair_proxima_pagina(page):
     seletores = [
         "a[rel='next']",
@@ -397,6 +452,7 @@ async def raspar_idealista_porto(url_base: str | None = None, store: Storage | N
                 await detalhe_page.goto(url, wait_until="networkidle", timeout=20000)
 
                 titulo, preco, descricao_completa = await extrair_dados_detalhe(detalhe_page)
+                data_atualizacao = await extrair_data_atualizacao_pagina(detalhe_page)
 
                 passou_filtro, status_match, trecho_status = analisar_fiador(descricao_completa)
                 tipo_anunciante = extrair_tipo_anunciante(descricao_completa)
@@ -415,6 +471,7 @@ async def raspar_idealista_porto(url_base: str | None = None, store: Storage | N
                     "link": url,
                     "descricao": descricao_completa[:250].replace("\n", " ") + "...",
                     "passou_filtro": passou_filtro,
+                    "data_atualizacao": data_atualizacao,
                 })
 
             except Exception as e:
