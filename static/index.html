@@ -10,27 +10,18 @@
   <div class="container">
     <h1>Oportunidades de arrendamento</h1>
 
-    <section class="panel">
-      <h2 class="panel-title">Configuração da busca</h2>
-      <div class="config-row">
-        <span class="config-label">URL padrão:</span>
-        <span id="urlDefault" class="url-default"></span>
-      </div>
-      <div class="config-row">
-        <label for="urlAtualInput" class="config-label">URL atual:</label>
-        <input id="urlAtualInput" type="text" class="url-input" />
-      </div>
-      <div class="config-actions">
-        <button id="saveUrlBtn" type="button">Guardar URL</button>
-        <button id="resetUrlBtn" type="button" class="secondary">Restaurar padrão</button>
-        <button id="runScraperBtn" type="button" class="primary">Executar scraper</button>
-      </div>
-      <div id="configMsg" class="config-msg"></div>
-      <div id="scrapeStatus" class="scrape-status idle"></div>
-    </section>
+    <div id="fontesContainer" class="fontes-container"></div>
 
     <div class="toolbar">
       <div class="filters-row">
+        <span class="filter-group search-group">
+          <label for="searchInput">Buscar:</label>
+          <input id="searchInput" class="search-input" type="text" placeholder="palavra-chave no título ou na descrição..." />
+        </span>
+        <span class="filter-group">
+          <label for="fonteFilter">Fonte:</label>
+          <select id="fonteFilter"></select>
+        </span>
         <span class="filter-group">
           <label for="statusFilter">Filtrar por status de fiador:</label>
           <select id="statusFilter"></select>

@@ -3,9 +3,18 @@ import json
 import random
 import re
 from datetime import date
+from typing import Callable
 from playwright.async_api import async_playwright
 
+from classificacao import (
+    analisar_fiador,
+    extrair_bloco_do_anuncio,
+    extrair_tipo_anunciante,
+    extrair_tipologia,
+)
 from storage import URL_BASE_DEFAULT, Storage, default_storage
+
+FONTE = "idealista"
 
 TEMPO_ENTRE_PAGINAS = 3.0
 TEMPO_ENTRE_ANUNCIOS = 2.5
@@ -16,158 +25,6 @@ MESES_PT = {
     "junho": 6, "julho": 7, "agosto": 8, "setembro": 9, "outubro": 10,
     "novembro": 11, "dezembro": 12,
 }
-
-# Distância máxima (sem atravessar pontuação de fim de frase) tolerada entre
-# um verbo de dispensa ("dispensa", "não exige"...) e a palavra "fiador",
-# para casar frases como "o senhorio dispensa a apresentação de fiador" sem
-# também casar um "dispensa"/"não" de outro assunto qualquer, em outra frase
-# da página, com um "fiador" mencionado bem mais adiante — era exatamente
-# esse o bug do padrão antigo "dispensa.*fiador", sem nenhum limite.
-_JANELA_PROXIMIDADE_FIADOR = r"[^.!?]{0,40}"
-
-PADROES_EXPLICITOS = [
-    r"\bsem fiador\b",
-    r"\bsem necessidade de fiador\b",
-    r"\bsem exig[êe]ncia de fiador\b",
-    # cobre "não exijo/exija" (1ª pessoa, forma irregular) e "não
-    # exige/exigem/exigia/exigimos" (demais conjugações de "exigir") antes
-    # de "fiador", com filler limitado à mesma frase.
-    rf"\bn[ãa]o\s+exi[jg]\w*{_JANELA_PROXIMIDADE_FIADOR}\bfiador\b",
-    # forma pós-posta: "fiador não é necessário/obrigatório"
-    rf"\bfiador\b{_JANELA_PROXIMIDADE_FIADOR}\bn[ãa]o\s+(?:é|e|era)\s+(?:necess[áa]ri[oa]|obrigat[óo]ri[oa])\b",
-    r"\bisent[oa]\s+de\s+fiador\b",
-    r"\bfiador\s+(?:opcional|dispens[áa]vel)\b",
-    rf"\bdispens\w*{_JANELA_PROXIMIDADE_FIADOR}\bfiador\b",
-    r"\bsubstitu[íi]vel por cau[çc][ãa]o\b",
-    r"\bcau[çc][ãa]o refor[çc]ada\b",
-    r"\brefor[çc]o de cau[çc][ãa]o\b",
-]
-
-def limpar_texto_cookie_banner(texto: str) -> str:
-    if not texto:
-        return texto
-
-    texto = re.sub(r"No idealista utilizamos cookies.*?política de cookies\.?", " ", texto, flags=re.IGNORECASE | re.DOTALL)
-    texto = re.sub(r"Nós e os nossos fornecedores efetuamos o seguinte tratamento de dados:.*?\.", " ", texto, flags=re.IGNORECASE | re.DOTALL)
-    texto = re.sub(r"\s+", " ", texto)
-    return texto.strip()
-
-
-def extrair_bloco_do_anuncio(texto: str) -> str:
-    if not texto:
-        return ""
-
-    texto = limpar_texto_cookie_banner(texto)
-    marcadores = [
-        "Comentário do anunciante",
-        "Descrição",
-        "Condições de Arrendamento",
-        "Observações",
-        "Sobre o imóvel",
-    ]
-
-    menores = []
-    for marcador in marcadores:
-        idx = texto.find(marcador)
-        if idx != -1:
-            menores.append(idx)
-
-    if menores:
-        start = min(menores)
-        return texto[start:].strip()
-
-    return texto.strip()
-
-
-def extrair_tipologia(titulo: str, texto: str) -> str:
-    """Deduz a tipologia (T1, T2, ...) a partir do título e do texto do anúncio.
-
-    Havia um 3º padrão de reserva que casava o primeiro número solto em
-    qualquer parte do título/texto (ex.: o "60" de "Rua Tal, 60", ou o "2"
-    de "a 2 minutos da estação"), virando "T60"/"T2" por engano. Sem um
-    "Txx" explícito perto de uma palavra do tipo de imóvel, é mais seguro
-    devolver "Indefinida" do que adivinhar a partir de um número qualquer.
-    """
-    texto_total = f"{titulo} {texto or ''}".lower()
-
-    padroes = [
-        r"\b(?:apartamento|casa|moradia|studio|loft|imóvel|imovel)\s*(?:t|tipo)?\s*(t?\d+[a-z]?)\b",
-        r"\b(t\d+[a-z]?)\b",
-    ]
-
-    for padrao in padroes:
-        match = re.search(padrao, texto_total, re.IGNORECASE)
-        if not match:
-            continue
-
-        valor = match.group(1).strip()
-
-        if valor.startswith("t"):
-            valor_normalizado = valor.upper()
-            if re.match(r"^T\d+[A-Z]?$", valor_normalizado):
-                return valor_normalizado
-        elif re.match(r"^\d+[a-z]?$", valor):
-            return f"T{valor.rstrip('abcdefghijklmnopqrstuvwxyz').upper()}"
-
-    return "Indefinida"
-
-
-def extrair_tipo_anunciante(texto: str) -> str:
-    """Adivinha o tipo de anunciante a partir do texto livre da descrição.
-
-    É um fallback: o idealista expõe esse dado de forma estruturada no
-    elemento ".professional-name" da página de detalhe (ver
-    `extrair_tipo_anunciante_pagina`), que é bem mais confiável do que
-    procurar as palavras "particular"/"profissional" soltas no texto —
-    elas podem aparecer em frases sem relação nenhuma com o tipo de
-    anunciante (ex.: "estacionamento particular", "acabamento profissional").
-    Isto só é usado quando aquele elemento não é encontrado na página.
-    """
-    if not texto or not texto.strip():
-        return "Desconhecido"
-
-    texto_normalizado = " ".join(texto.split())
-    padroes = [
-        r"anunciante\s+(particular|profissional)",
-        r"(particular|profissional)\s+anunciante",
-        r"(particular|profissional)\s*(?:no|na|do|da)?\s*(?:anúncio|anuncio|imóvel|imovel)",
-    ]
-
-    for padrao in padroes:
-        match = re.search(padrao, texto_normalizado, re.IGNORECASE)
-        if match:
-            valor = match.group(1).strip().lower()
-            if "particular" in valor:
-                return "Particular"
-            if "profissional" in valor:
-                return "Profissional"
-
-    if re.search(r"\bparticular\b", texto_normalizado, re.IGNORECASE):
-        return "Particular"
-    if re.search(r"\bprofissional\b|\bimobiliária\b|\bagente\b", texto_normalizado, re.IGNORECASE):
-        return "Profissional"
-    return "Desconhecido"
-
-
-def extrair_trecho_status(texto: str, padrao: str | None = None) -> str | None:
-    if not texto or not texto.strip():
-        return None
-
-    texto_normalizado = " ".join(texto.split())
-    if padrao:
-        match = re.search(padrao, texto_normalizado, re.IGNORECASE)
-        if not match:
-            return None
-        inicio = max(0, match.start() - 80)
-        fim = min(len(texto_normalizado), match.end() + 220)
-        return texto_normalizado[inicio:fim].strip()
-
-    match = re.search(r"fiador", texto_normalizado, re.IGNORECASE)
-    if not match:
-        return None
-    inicio = max(0, match.start() - 90)
-    fim = min(len(texto_normalizado), match.end() + 220)
-    return texto_normalizado[inicio:fim].strip()
 
 
 def extrair_data_atualizacao(texto: str | None, hoje: date | None = None) -> str | None:
@@ -206,55 +63,6 @@ def extrair_data_atualizacao(texto: str | None, hoje: date | None = None) -> str
 
     return data.isoformat()
 
-
-def detectar_bloqueio_idealista(texto: str) -> bool:
-    if not texto or not texto.strip():
-        return False
-
-    texto_lower = texto.lower()
-    padroes_bloqueio = [
-        "demasiados pedidos",
-        "muitos pedidos",
-        "aguarde uns momentos",
-        "tente novamente",
-        "ray id",
-        "cloudflare",
-        "captcha",
-        "anti-bot",
-        "too many requests",
-        "blocked",
-        "temporariamente indisponível",
-        "do not share your credentials",
-    ]
-    return any(padrao in texto_lower for padrao in padroes_bloqueio)
-
-
-def analisar_fiador(texto: str) -> tuple[bool, str, str | None]:
-    if not texto or not texto.strip():
-        return False, "ERRO_TEXTO_VAZIO", None
-
-    texto = extrair_bloco_do_anuncio(texto)
-    if not texto.strip():
-        return False, "ERRO_TEXTO_VAZIO", None
-
-    texto_lower = texto.lower()
-
-    if detectar_bloqueio_idealista(texto):
-        trecho = extrair_trecho_status(texto, r"demasiados pedidos|aguarde uns momentos|ray id|cloudflare|captcha|too many requests")
-        return False, "BLOQUEADO_POR_ANTI_BOT", trecho or texto[:300]
-
-    # 1. Verifica se há confirmação explícita de flexibilidade
-    for padrao in PADROES_EXPLICITOS:
-        trecho = extrair_trecho_status(texto, padrao)
-        if trecho:
-            return True, "CONFIRMADO (Explícito/Flexível)", trecho
-
-    # 2. Verifica ausência TOTAL da palavra fiador
-    if not re.search(r"fiador", texto, re.IGNORECASE):
-        return True, "SEM MENÇÃO (Não cita fiador)", None
-
-    trecho = extrair_trecho_status(texto)
-    return True, "EXIGE FIADOR", trecho
 
 async def aceitar_cookies_se_possivel(page):
     seletores = [
@@ -423,7 +231,12 @@ async def extrair_proxima_pagina(page):
     return None
 
 
-async def raspar_idealista_porto(url_base: str | None = None, store: Storage | None = None, headless: bool = False):
+async def raspar_idealista_porto(
+    url_base: str | None = None,
+    store: Storage | None = None,
+    headless: bool = False,
+    progress_callback: Callable[[int, int], None] | None = None,
+):
     url_base = url_base or URL_BASE_DEFAULT
     store = store or default_storage
     historico = store.carregar_historico()
@@ -483,6 +296,11 @@ async def raspar_idealista_porto(url_base: str | None = None, store: Storage | N
 
             url_atual = proxima_pagina
 
+        # Todos os links já foram coletados; fecha a aba de listagem em vez de
+        # deixá-la aberta e esquecida durante toda a fase de detalhe (que pode
+        # levar dezenas de minutos).
+        await page.close()
+
         anuncios_filtrados = []
 
         for i, url in enumerate(links_imoveis, 1):
@@ -510,7 +328,7 @@ async def raspar_idealista_porto(url_base: str | None = None, store: Storage | N
                 if trecho_status:
                     store.log_mensagem(f"     Trecho: {trecho_status[:180]}")
 
-                anuncios_filtrados.append({
+                item = {
                     "titulo": titulo,
                     "preco": preco,
                     "tipologia": extrair_tipologia(titulo, descricao_completa),
@@ -518,21 +336,27 @@ async def raspar_idealista_porto(url_base: str | None = None, store: Storage | N
                     "status": status_match,
                     "trecho_status": trecho_status,
                     "link": url,
-                    "descricao": descricao_completa[:250].replace("\n", " ") + "...",
+                    "descricao": descricao_completa,
                     "passou_filtro": passou_filtro,
                     "data_atualizacao": data_atualizacao,
-                })
+                }
+                anuncios_filtrados.append(item)
+                # Guarda no disco assim que este anúncio é classificado, em vez
+                # de só no final da varredura inteira — se o processo for
+                # interrompido no meio, o que já foi analisado não se perde.
+                store.atualizar_resultados(FONTE, [item])
 
             except Exception as e:
                 store.log_mensagem(f"  -> Erro ao processar imóvel: {e}")
             finally:
                 await detalhe_page.close()
+                if progress_callback:
+                    progress_callback(i, len(links_imoveis))
                 if i < len(links_imoveis):
                     pausa = TEMPO_ENTRE_ANUNCIOS + random.uniform(0.3, 1.5)
                     store.log_mensagem(f"Pausa entre anúncios: {pausa:.1f}s")
                     await asyncio.sleep(pausa)
 
-        store.atualizar_resultados(anuncios_filtrados)
         await browser.close()
         return anuncios_filtrados
 

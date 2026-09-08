@@ -1,4 +1,7 @@
 const els = {
+  fontesContainer: document.getElementById('fontesContainer'),
+  searchInput: document.getElementById('searchInput'),
+  fonteFilter: document.getElementById('fonteFilter'),
   statusFilter: document.getElementById('statusFilter'),
   tipologiaFilter: document.getElementById('tipologiaFilter'),
   anuncianteFilter: document.getElementById('anuncianteFilter'),
@@ -9,23 +12,22 @@ const els = {
   summary: document.getElementById('summary'),
   results: document.getElementById('results'),
   refreshBtn: document.getElementById('refreshBtn'),
-  urlDefault: document.getElementById('urlDefault'),
-  urlAtualInput: document.getElementById('urlAtualInput'),
-  saveUrlBtn: document.getElementById('saveUrlBtn'),
-  resetUrlBtn: document.getElementById('resetUrlBtn'),
-  configMsg: document.getElementById('configMsg'),
-  runScraperBtn: document.getElementById('runScraperBtn'),
-  scrapeStatus: document.getElementById('scrapeStatus'),
 };
 
 let cachedData = [];
+let fonteLabels = {};
 let pollTimer = null;
+let ultimoEstadoPorFonte = {};
 
 function statusClass(item) {
   if (item.passou_filtro === false) return 'warning';
   if (item.status.includes('CONFIRMADO')) return 'match';
   if (item.status.includes('SEM MENÇÃO')) return 'sem';
   return 'ignored';
+}
+
+function rotuloFonte(fonte) {
+  return fonteLabels[fonte] || fonte;
 }
 
 function normalizarTipologia(value) {
@@ -37,11 +39,11 @@ function normalizarTipologia(value) {
   return `T${clean.replace(/[^\d]/g, '')}`;
 }
 
-function fillSelect(selectEl, values, allLabel, allValue) {
+function fillSelect(selectEl, values, allLabel, allValue, labelFor) {
   const selected = selectEl.value || allValue;
   const options = [allValue, ...values];
   selectEl.innerHTML = options.map(value => {
-    const label = value === allValue ? allLabel : value;
+    const label = value === allValue ? allLabel : (labelFor ? labelFor(value) : value);
     return `<option value="${value}">${label}</option>`;
   }).join('');
   selectEl.value = options.includes(selected) ? selected : allValue;
@@ -67,6 +69,8 @@ function parsePreco(precoStr) {
 }
 
 function applyFilters(data) {
+  const termoBusca = els.searchInput.value.trim().toLowerCase();
+  const fonteSelected = els.fonteFilter.value || 'todas';
   const statusSelected = els.statusFilter.value || 'todos';
   const tipologiaSelected = els.tipologiaFilter.value || 'todas';
   const anuncianteSelected = els.anuncianteFilter.value || 'todos';
@@ -75,6 +79,11 @@ function applyFilters(data) {
   const precoMax = els.precoMaxFilter.value !== '' ? parseFloat(els.precoMaxFilter.value) : null;
 
   return data.filter(item => {
+    if (termoBusca) {
+      const textoPesquisavel = `${item.titulo} ${item.descricao} ${item.trecho_status || ''}`.toLowerCase();
+      if (!textoPesquisavel.includes(termoBusca)) return false;
+    }
+    if (fonteSelected !== 'todas' && item.fonte !== fonteSelected) return false;
     if (statusSelected !== 'todos' && item.status !== statusSelected) return false;
     if (tipologiaSelected !== 'todas' && normalizarTipologia(item.tipologia) !== tipologiaSelected) return false;
     if (anuncianteSelected !== 'todos' && (item.tipo_anunciante || 'Desconhecido') !== anuncianteSelected) return false;
@@ -130,7 +139,10 @@ function render() {
   els.results.innerHTML = filtered.map(item => `
     <div class="card ${item.favorito ? 'is-favorito' : ''}" data-link="${item.link}">
       <div class="card-header">
-        <div class="badge ${statusClass(item)}">${item.status}</div>
+        <div class="badges">
+          <div class="badge ${statusClass(item)}">${item.status}</div>
+          <div class="badge fonte">${rotuloFonte(item.fonte)}</div>
+        </div>
         <button class="fav-btn ${item.favorito ? 'active' : ''}" data-link="${item.link}" type="button" aria-pressed="${item.favorito}">
           ${item.favorito ? '★ Favorito' : '☆ Favoritar'}
         </button>
@@ -147,12 +159,15 @@ function render() {
       <div class="meta"><strong>Atualizado em:</strong> ${formatarData(item.data_atualizacao)}</div>
       <div class="meta"><strong>Link:</strong> <a href="${item.link}" target="_blank" rel="noreferrer">Abrir anúncio</a></div>
       <div class="meta"><strong>Trecho decisivo:</strong> ${item.trecho_status || 'Sem trecho identificado'}</div>
-      <div class="descricao">${item.descricao}</div>
+      <div class="descricao" title="Clique para expandir/recolher a descrição completa">${item.descricao}</div>
     </div>
   `).join('');
 
   els.results.querySelectorAll('.fav-btn').forEach(btn => {
     btn.addEventListener('click', () => toggleFavorite(btn.dataset.link));
+  });
+  els.results.querySelectorAll('.descricao').forEach(el => {
+    el.addEventListener('click', () => el.classList.toggle('expanded'));
   });
 }
 
@@ -169,16 +184,17 @@ async function toggleFavorite(link) {
     if (item) item.favorito = data.favorito;
     render();
   } catch (error) {
-    els.configMsg.textContent = error.message;
+    console.error(error);
   }
 }
 
 async function fetchResults() {
   try {
     const response = await fetch('/api/results');
-    if (!response.ok) throw new Error('Resultados não encontrados. Executa o scraper primeiro.');
+    if (!response.ok) throw new Error('Resultados não encontrados. Executa um scraper primeiro.');
     cachedData = await response.json();
 
+    fillSelect(els.fonteFilter, [...new Set(cachedData.map(i => i.fonte))], 'Todas', 'todas', rotuloFonte);
     fillSelect(els.statusFilter, [...new Set(cachedData.map(i => i.status))], 'Todos', 'todos');
     fillSelect(els.tipologiaFilter, [...new Set(cachedData.map(i => normalizarTipologia(i.tipologia)))], 'Todas', 'todas');
     fillSelect(els.anuncianteFilter, [...new Set(cachedData.map(i => i.tipo_anunciante || 'Desconhecido'))], 'Todos', 'todos');
@@ -190,72 +206,150 @@ async function fetchResults() {
   }
 }
 
+function painelFonteHTML(fonte, dados) {
+  return `
+    <section class="panel" data-fonte="${fonte}">
+      <h2 class="panel-title">Configuração da busca — ${dados.label}</h2>
+      <div class="config-row">
+        <span class="config-label">URL padrão:</span>
+        <span class="url-default" title="${dados.url_default}">${dados.url_default}</span>
+      </div>
+      <div class="config-row">
+        <label class="config-label">URL atual:</label>
+        <input type="text" class="url-input url-atual-input" value="${dados.url_atual}" />
+      </div>
+      <div class="config-actions">
+        <button type="button" class="save-url-btn">Guardar URL</button>
+        <button type="button" class="secondary reset-url-btn">Restaurar padrão</button>
+        <button type="button" class="primary run-scraper-btn">Executar scraper</button>
+      </div>
+      <div class="config-msg"></div>
+      <div class="scrape-status idle"></div>
+      <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden>
+        <div class="progress-bar-fill"></div>
+      </div>
+    </section>
+  `;
+}
+
 async function fetchConfig() {
   const response = await fetch('/api/config');
   const config = await response.json();
-  els.urlDefault.textContent = config.url_default;
-  els.urlDefault.title = config.url_default;
-  els.urlAtualInput.value = config.url_atual;
+
+  fonteLabels = Object.fromEntries(Object.entries(config).map(([fonte, dados]) => [fonte, dados.label]));
+  els.fontesContainer.innerHTML = Object.entries(config).map(([fonte, dados]) => painelFonteHTML(fonte, dados)).join('');
+
   return config;
 }
 
-async function saveUrl() {
-  els.configMsg.textContent = '';
-  const url = els.urlAtualInput.value.trim();
-  const response = await fetch('/api/config', {
+async function saveUrl(fonte, painel) {
+  const msgEl = painel.querySelector('.config-msg');
+  const inputEl = painel.querySelector('.url-atual-input');
+  msgEl.textContent = '';
+
+  const url = inputEl.value.trim();
+  const response = await fetch(`/api/config/${fonte}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
   });
   const data = await response.json();
   if (!response.ok) {
-    els.configMsg.textContent = data.erro || 'Erro ao guardar a URL.';
+    msgEl.textContent = data.erro || 'Erro ao guardar a URL.';
     return;
   }
-  els.urlAtualInput.value = data.url_atual;
-  els.configMsg.textContent = 'URL de busca atualizada com sucesso.';
+  inputEl.value = data.url_atual;
+  msgEl.textContent = 'URL de busca atualizada com sucesso.';
 }
 
-async function resetUrl() {
-  const response = await fetch('/api/config/reset', { method: 'POST' });
+async function resetUrl(fonte, painel) {
+  const response = await fetch(`/api/config/${fonte}/reset`, { method: 'POST' });
   const data = await response.json();
-  els.urlAtualInput.value = data.url_atual;
-  els.configMsg.textContent = 'URL restaurada para o valor padrão.';
+  painel.querySelector('.url-atual-input').value = data.url_atual;
+  painel.querySelector('.config-msg').textContent = 'URL restaurada para o valor padrão.';
 }
 
-function setScrapeStatusUI(status) {
+function formatarEta(segundos) {
+  if (segundos === null || segundos === undefined) return '';
+  if (segundos < 60) return `~${Math.max(1, Math.round(segundos))}s restantes`;
+  const minutos = Math.round(segundos / 60);
+  return `~${minutos} min restante${minutos === 1 ? '' : 's'}`;
+}
+
+function atualizarPainelDeStatus(fonte, status) {
+  const painel = els.fontesContainer.querySelector(`[data-fonte="${fonte}"]`);
+  if (!painel) return;
+
   const labels = {
     idle: 'Nenhuma execução iniciada.',
-    running: 'Scraper em execução... isto pode demorar alguns minutos.',
+    running: status.mensagem || 'Scraper em execução...',
     done: status.mensagem || 'Execução concluída.',
     error: status.mensagem || 'Ocorreu um erro durante a execução.',
   };
-  els.scrapeStatus.textContent = labels[status.state] || '';
-  els.scrapeStatus.className = `scrape-status ${status.state}`;
-  els.runScraperBtn.disabled = status.state === 'running';
+  let texto = labels[status.state] || '';
+  const emProgresso = status.state === 'running' && status.total;
+  if (emProgresso) {
+    const eta = formatarEta(status.eta_segundos);
+    if (eta) texto += ` (${eta})`;
+  }
+
+  const statusEl = painel.querySelector('.scrape-status');
+  statusEl.textContent = texto;
+  statusEl.className = `scrape-status ${status.state}`;
+  painel.querySelector('.run-scraper-btn').disabled = status.state === 'running';
+
+  const barraEl = painel.querySelector('.progress-bar');
+  barraEl.hidden = !emProgresso;
+  if (emProgresso) {
+    const pct = Math.min(100, Math.round((status.atual / status.total) * 100));
+    barraEl.querySelector('.progress-bar-fill').style.width = `${pct}%`;
+    barraEl.setAttribute('aria-valuenow', String(pct));
+  }
 }
 
 async function pollScrapeStatus() {
   const response = await fetch('/api/scrape/status');
-  const status = await response.json();
-  setScrapeStatusUI(status);
+  const statusPorFonte = await response.json();
+
+  let algumaEmExecucao = false;
+  let algumaAcabouDeConcluir = false;
+
+  for (const [fonte, status] of Object.entries(statusPorFonte)) {
+    atualizarPainelDeStatus(fonte, status);
+    if (status.state === 'running') algumaEmExecucao = true;
+    if (status.state === 'done' && ultimoEstadoPorFonte[fonte] === 'running') algumaAcabouDeConcluir = true;
+    ultimoEstadoPorFonte[fonte] = status.state;
+  }
+
+  if (algumaAcabouDeConcluir) fetchResults();
 
   clearTimeout(pollTimer);
-  if (status.state === 'running') {
+  if (algumaEmExecucao) {
     pollTimer = setTimeout(pollScrapeStatus, 3000);
-  } else if (status.state === 'done') {
-    fetchResults();
   }
 }
 
-async function runScraper() {
-  const response = await fetch('/api/scrape', { method: 'POST' });
+async function runScraper(fonte, painel) {
+  const response = await fetch(`/api/scrape/${fonte}`, { method: 'POST' });
   const status = await response.json();
-  setScrapeStatusUI(status);
+  atualizarPainelDeStatus(fonte, status);
   if (response.status === 409) return;
+  ultimoEstadoPorFonte[fonte] = 'running';
   pollScrapeStatus();
 }
 
+els.fontesContainer.addEventListener('click', event => {
+  const painel = event.target.closest('[data-fonte]');
+  if (!painel) return;
+  const fonte = painel.dataset.fonte;
+
+  if (event.target.classList.contains('save-url-btn')) saveUrl(fonte, painel);
+  else if (event.target.classList.contains('reset-url-btn')) resetUrl(fonte, painel);
+  else if (event.target.classList.contains('run-scraper-btn')) runScraper(fonte, painel);
+});
+
+els.searchInput.addEventListener('input', render);
+els.fonteFilter.addEventListener('change', render);
 els.statusFilter.addEventListener('change', render);
 els.tipologiaFilter.addEventListener('change', render);
 els.anuncianteFilter.addEventListener('change', render);
@@ -264,10 +358,9 @@ els.precoMaxFilter.addEventListener('input', render);
 els.sortOrder.addEventListener('change', render);
 els.favoritosOnly.addEventListener('change', render);
 els.refreshBtn.addEventListener('click', fetchResults);
-els.saveUrlBtn.addEventListener('click', saveUrl);
-els.resetUrlBtn.addEventListener('click', resetUrl);
-els.runScraperBtn.addEventListener('click', runScraper);
 
-fetchConfig();
-fetchResults();
-pollScrapeStatus();
+(async () => {
+  await fetchConfig();
+  await fetchResults();
+  pollScrapeStatus();
+})();

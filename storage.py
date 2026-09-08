@@ -1,8 +1,13 @@
-"""Persistência em JSON usada pelo scraper e pela API web.
+"""Persistência em JSON usada pelos scrapers e pela API web.
 
 Centraliza toda a leitura/escrita de ficheiros em `data/` (histórico,
-resultados, configuração da URL de busca e favoritos) para que tanto o
-scraper quanto a aplicação Flask usem a mesma fonte de verdade.
+resultados, configuração da URL de busca e favoritos) para que tanto os
+scrapers quanto a aplicação Flask usem a mesma fonte de verdade.
+
+Suporta múltiplos sites de origem ("fontes"). O histórico de anúncios já
+visitados é único e partilhado entre fontes (os links já são globalmente
+únicos por incluírem o domínio); resultados e a URL de busca configurada
+são guardados por fonte.
 """
 from __future__ import annotations
 
@@ -14,12 +19,37 @@ from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent
 
-URL_BASE_DEFAULT = (
-    "https://www.idealista.pt/areas/arrendar-casas/com-preco-max_999,tamanho-min_60,"
-    "apartamentos,t1,t2,t3,t4-t5,arrendamento-longa-duracao/"
+URL_BASE_DEFAULT_IDEALISTA = (
+    "https://www.idealista.pt/areas/arrendar-casas/com-preco-max_999,tamanho-min_50,"
+    "apartamentos,moradias-independentes,moradias-geminadas,moradias-em-banda,"
+    "t0,t1,t2,t3,t4-t5,arrendamento-longa-duracao/"
     "?shape=%28%28_tdzFp%7Cxs%40goBglAaC%7BhFvz%40ceCbpBmEdyE%7Ci%40xPjzB%7DbAb%7C%40c%7BAlSkc%40vlDc_B%60%5D%29%29"
     "&ordem=precos-asc"
 )
+# Nome antigo, mantido por compatibilidade com quem já importava esta constante.
+URL_BASE_DEFAULT = URL_BASE_DEFAULT_IDEALISTA
+
+URL_BASE_DEFAULT_IMOVIRTUAL = (
+    "https://www.imovirtual.com/pt/resultados/arrendar/apartamento/porto/porto"
+    "?distanceRadius=5&limit=36&priceMax=1000&areaMin=60&by=DEFAULT&direction=DESC"
+)
+
+# Registo central das fontes suportadas. Adicionar um novo site de scraping
+# (ex.: OLX) é, na parte de armazenamento, só acrescentar uma entrada aqui.
+FONTES: dict[str, dict] = {
+    "idealista": {
+        "label": "idealista.pt",
+        "dominio": "https://www.idealista.pt",
+        "url_default": URL_BASE_DEFAULT_IDEALISTA,
+        "resultados_filename": "resultados_idealista.json",
+    },
+    "imovirtual": {
+        "label": "Imovirtual",
+        "dominio": "https://www.imovirtual.com",
+        "url_default": URL_BASE_DEFAULT_IMOVIRTUAL,
+        "resultados_filename": "resultados_imovirtual.json",
+    },
+}
 
 
 class Storage:
@@ -33,7 +63,6 @@ class Storage:
     def __init__(self, data_dir: Path | str):
         self.data_dir = Path(data_dir)
         self.historico_path = self.data_dir / "historico_anuncios.json"
-        self.resultados_path = self.data_dir / "resultados_idealista.json"
         self.config_path = self.data_dir / "config.json"
         self.favoritos_path = self.data_dir / "favoritos.json"
         self.log_path = self.data_dir / "scraper_log.txt"
@@ -57,7 +86,11 @@ class Storage:
             with path.open("w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
-    # ---- Histórico de anúncios já visitados --------------------------------
+    def _validar_fonte(self, fonte: str) -> None:
+        if fonte not in FONTES:
+            raise ValueError(f"Fonte desconhecida: {fonte!r} (esperado uma de {sorted(FONTES)})")
+
+    # ---- Histórico de anúncios já visitados (partilhado entre fontes) ------
 
     def carregar_historico(self) -> set[str]:
         dados = self._read_json(self.historico_path, [])
@@ -68,24 +101,38 @@ class Storage:
     def guardar_historico(self, historico: set[str]) -> None:
         self._write_json(self.historico_path, sorted(historico))
 
-    # ---- Resultados da última varredura ------------------------------------
+    # ---- Resultados da última varredura, por fonte --------------------------
 
-    def carregar_resultados(self) -> list[dict]:
-        dados = self._read_json(self.resultados_path, [])
+    def _resultados_path(self, fonte: str) -> Path:
+        self._validar_fonte(fonte)
+        return self.data_dir / FONTES[fonte]["resultados_filename"]
+
+    def carregar_resultados(self, fonte: str) -> list[dict]:
+        dados = self._read_json(self._resultados_path(fonte), [])
         return dados if isinstance(dados, list) else []
 
-    def guardar_resultados(self, resultados: list[dict]) -> None:
-        self._write_json(self.resultados_path, resultados)
+    def carregar_resultados_todas_fontes(self) -> list[dict]:
+        """Resultados de todas as fontes combinados, cada item com a chave "fonte"."""
+        todos: list[dict] = []
+        for fonte in FONTES:
+            for item in self.carregar_resultados(fonte):
+                item = dict(item)
+                item.setdefault("fonte", fonte)
+                todos.append(item)
+        return todos
 
-    def atualizar_resultados(self, novos: list[dict]) -> list[dict]:
-        """Mescla `novos` aos resultados já guardados, por `link`.
+    def guardar_resultados(self, fonte: str, resultados: list[dict]) -> None:
+        self._write_json(self._resultados_path(fonte), resultados)
+
+    def atualizar_resultados(self, fonte: str, novos: list[dict]) -> list[dict]:
+        """Mescla `novos` aos resultados já guardados dessa fonte, por `link`.
 
         Cada execução do scraper só revisita anúncios que ainda não estão no
         histórico, então uma simples sobrescrita apagaria os achados de
         execuções anteriores. Aqui, anúncios repetidos são atualizados no
         lugar e os demais são preservados; novos anúncios são anexados.
         """
-        existentes = self.carregar_resultados()
+        existentes = self.carregar_resultados(fonte)
         indice = {item.get("link"): pos for pos, item in enumerate(existentes) if item.get("link")}
 
         for item in novos:
@@ -97,29 +144,49 @@ class Storage:
                 if link:
                     indice[link] = len(existentes) - 1
 
-        self.guardar_resultados(existentes)
+        self.guardar_resultados(fonte, existentes)
         return existentes
 
-    # ---- Configuração da URL de busca --------------------------------------
+    # ---- Configuração da URL de busca, por fonte -----------------------------
 
-    def carregar_config(self) -> dict:
+    def _ler_config_bruta(self) -> dict:
         dados = self._read_json(self.config_path, {})
         if not isinstance(dados, dict):
-            dados = {}
-        return {
-            "url_default": URL_BASE_DEFAULT,
-            "url_atual": dados.get("url_atual") or URL_BASE_DEFAULT,
-        }
+            return {}
+        # Formato antigo (uma única fonte, sem aninhamento): {"url_atual": "..."}
+        # é tratado como um override só da fonte "idealista".
+        if "url_atual" in dados and not any(fonte in dados for fonte in FONTES):
+            return {"idealista": {"url_atual": dados.get("url_atual")}}
+        return dados
 
-    def guardar_url_atual(self, url: str) -> dict:
-        self._write_json(self.config_path, {"url_atual": url})
-        return self.carregar_config()
+    def carregar_config(self) -> dict[str, dict]:
+        """Configuração de todas as fontes: `{"idealista": {...}, "imovirtual": {...}}`."""
+        dados = self._ler_config_bruta()
+        config = {}
+        for fonte, info in FONTES.items():
+            override = dados.get(fonte)
+            override = override if isinstance(override, dict) else {}
+            config[fonte] = {
+                "url_default": info["url_default"],
+                "url_atual": override.get("url_atual") or info["url_default"],
+            }
+        return config
 
-    def resetar_url(self) -> dict:
-        self._write_json(self.config_path, {"url_atual": None})
-        return self.carregar_config()
+    def guardar_url_atual(self, fonte: str, url: str) -> dict:
+        self._validar_fonte(fonte)
+        dados = self._ler_config_bruta()
+        dados[fonte] = {"url_atual": url}
+        self._write_json(self.config_path, dados)
+        return self.carregar_config()[fonte]
 
-    # ---- Favoritos ----------------------------------------------------------
+    def resetar_url(self, fonte: str) -> dict:
+        self._validar_fonte(fonte)
+        dados = self._ler_config_bruta()
+        dados[fonte] = {"url_atual": None}
+        self._write_json(self.config_path, dados)
+        return self.carregar_config()[fonte]
+
+    # ---- Favoritos (partilhados entre fontes) --------------------------------
 
     def carregar_favoritos(self) -> set[str]:
         dados = self._read_json(self.favoritos_path, [])

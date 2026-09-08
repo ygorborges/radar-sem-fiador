@@ -1,7 +1,7 @@
 """Testes da camada de persistência (Storage), isolados em pasta temporária."""
 import pytest
 
-from storage import Storage, URL_BASE_DEFAULT
+from storage import FONTES, Storage, URL_BASE_DEFAULT_IDEALISTA, URL_BASE_DEFAULT_IMOVIRTUAL
 
 
 @pytest.fixture
@@ -10,29 +10,50 @@ def store(tmp_path):
 
 
 class TestHistorico:
+    """Histórico é único e partilhado entre fontes (links já são globalmente únicos)."""
+
     def test_historico_vazio_quando_nao_existe(self, store):
         assert store.carregar_historico() == set()
 
     def test_guarda_e_recarrega_historico(self, store):
-        store.guardar_historico({"https://a.pt/1", "https://a.pt/2"})
-        assert store.carregar_historico() == {"https://a.pt/1", "https://a.pt/2"}
+        store.guardar_historico({"https://a.pt/1", "https://imovirtual.com/2"})
+        assert store.carregar_historico() == {"https://a.pt/1", "https://imovirtual.com/2"}
 
 
 class TestResultados:
     def test_resultados_vazios_quando_nao_existe(self, store):
-        assert store.carregar_resultados() == []
+        assert store.carregar_resultados("idealista") == []
+
+    def test_fonte_desconhecida_levanta_erro(self, store):
+        with pytest.raises(ValueError):
+            store.carregar_resultados("olx")
 
     def test_guarda_e_recarrega_resultados(self, store):
         dados = [{"titulo": "Apto T2", "link": "https://a.pt/1"}]
-        store.guardar_resultados(dados)
-        assert store.carregar_resultados() == dados
+        store.guardar_resultados("idealista", dados)
+        assert store.carregar_resultados("idealista") == dados
+
+    def test_fontes_diferentes_ficam_em_ficheiros_separados(self, store):
+        store.guardar_resultados("idealista", [{"titulo": "Do idealista", "link": "https://a.pt/1"}])
+        store.guardar_resultados("imovirtual", [{"titulo": "Do imovirtual", "link": "https://b.pt/1"}])
+
+        assert store.carregar_resultados("idealista") == [{"titulo": "Do idealista", "link": "https://a.pt/1"}]
+        assert store.carregar_resultados("imovirtual") == [{"titulo": "Do imovirtual", "link": "https://b.pt/1"}]
+
+    def test_carregar_resultados_todas_fontes_marca_cada_item_com_a_fonte(self, store):
+        store.guardar_resultados("idealista", [{"titulo": "Do idealista", "link": "https://a.pt/1"}])
+        store.guardar_resultados("imovirtual", [{"titulo": "Do imovirtual", "link": "https://b.pt/1"}])
+
+        todos = store.carregar_resultados_todas_fontes()
+        por_link = {item["link"]: item["fonte"] for item in todos}
+        assert por_link == {"https://a.pt/1": "idealista", "https://b.pt/1": "imovirtual"}
 
     def test_atualizar_resultados_preserva_achados_de_execucoes_anteriores(self, store):
-        store.guardar_resultados([
+        store.guardar_resultados("idealista", [
             {"titulo": "Anúncio antigo", "link": "https://a.pt/1", "status": "CONFIRMADO"},
         ])
 
-        resultado = store.atualizar_resultados([
+        resultado = store.atualizar_resultados("idealista", [
             {"titulo": "Anúncio novo", "link": "https://a.pt/2", "status": "EXIGE FIADOR"},
         ])
 
@@ -40,14 +61,14 @@ class TestResultados:
         assert links == {"https://a.pt/1", "https://a.pt/2"}
         # A varredura seguinte não revisita ".../1" (já está no histórico), mas
         # o anúncio encontrado antes não pode desaparecer dos resultados.
-        assert store.carregar_resultados() == resultado
+        assert store.carregar_resultados("idealista") == resultado
 
     def test_atualizar_resultados_substitui_entrada_com_mesmo_link(self, store):
-        store.guardar_resultados([
+        store.guardar_resultados("idealista", [
             {"titulo": "Título desatualizado", "link": "https://a.pt/1", "status": "EXIGE FIADOR"},
         ])
 
-        resultado = store.atualizar_resultados([
+        resultado = store.atualizar_resultados("idealista", [
             {"titulo": "Título atualizado", "link": "https://a.pt/1", "status": "CONFIRMADO"},
         ])
 
@@ -57,32 +78,51 @@ class TestResultados:
 
     def test_atualizar_resultados_com_lista_vazia_nao_apaga_nada(self, store):
         dados = [{"titulo": "Anúncio", "link": "https://a.pt/1"}]
-        store.guardar_resultados(dados)
-        resultado = store.atualizar_resultados([])
+        store.guardar_resultados("idealista", dados)
+        resultado = store.atualizar_resultados("idealista", [])
         assert resultado == dados
 
     def test_ficheiro_corrompido_retorna_lista_vazia(self, store):
         store.ensure_dir()
-        store.resultados_path.write_text("{ isto nao e json valido", encoding="utf-8")
-        assert store.carregar_resultados() == []
+        (store.data_dir / FONTES["idealista"]["resultados_filename"]).write_text("{ isto nao e json valido", encoding="utf-8")
+        assert store.carregar_resultados("idealista") == []
 
 
 class TestConfig:
     def test_config_padrao_quando_nao_existe(self, store):
         config = store.carregar_config()
-        assert config["url_default"] == URL_BASE_DEFAULT
-        assert config["url_atual"] == URL_BASE_DEFAULT
+        assert config["idealista"]["url_default"] == URL_BASE_DEFAULT_IDEALISTA
+        assert config["idealista"]["url_atual"] == URL_BASE_DEFAULT_IDEALISTA
+        assert config["imovirtual"]["url_default"] == URL_BASE_DEFAULT_IMOVIRTUAL
+        assert config["imovirtual"]["url_atual"] == URL_BASE_DEFAULT_IMOVIRTUAL
 
     def test_guardar_url_atual_sobrepoe_url_atual_mas_preserva_default(self, store):
         nova_url = "https://www.idealista.pt/areas/arrendar-casas/porto/"
-        config = store.guardar_url_atual(nova_url)
+        config = store.guardar_url_atual("idealista", nova_url)
         assert config["url_atual"] == nova_url
-        assert config["url_default"] == URL_BASE_DEFAULT
+        assert config["url_default"] == URL_BASE_DEFAULT_IDEALISTA
+
+    def test_guardar_url_de_uma_fonte_nao_afeta_a_outra(self, store):
+        store.guardar_url_atual("idealista", "https://www.idealista.pt/outra-busca/")
+        config = store.carregar_config()
+        assert config["imovirtual"]["url_atual"] == URL_BASE_DEFAULT_IMOVIRTUAL
 
     def test_resetar_url_volta_ao_padrao(self, store):
-        store.guardar_url_atual("https://www.idealista.pt/outra-busca/")
-        config = store.resetar_url()
-        assert config["url_atual"] == URL_BASE_DEFAULT
+        store.guardar_url_atual("idealista", "https://www.idealista.pt/outra-busca/")
+        config = store.resetar_url("idealista")
+        assert config["url_atual"] == URL_BASE_DEFAULT_IDEALISTA
+
+    def test_fonte_desconhecida_levanta_erro(self, store):
+        with pytest.raises(ValueError):
+            store.guardar_url_atual("olx", "https://www.olx.pt/busca/")
+
+    def test_migra_formato_antigo_sem_aninhamento_por_fonte(self, store):
+        # Formato anterior à existência de múltiplas fontes: {"url_atual": "..."}
+        # é interpretado como um override só da fonte "idealista".
+        store._write_json(store.config_path, {"url_atual": "https://www.idealista.pt/url-antiga/"})
+        config = store.carregar_config()
+        assert config["idealista"]["url_atual"] == "https://www.idealista.pt/url-antiga/"
+        assert config["imovirtual"]["url_atual"] == URL_BASE_DEFAULT_IMOVIRTUAL
 
 
 class TestFavoritos:
