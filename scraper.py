@@ -17,17 +17,30 @@ MESES_PT = {
     "novembro": 11, "dezembro": 12,
 }
 
+# Distância máxima (sem atravessar pontuação de fim de frase) tolerada entre
+# um verbo de dispensa ("dispensa", "não exige"...) e a palavra "fiador",
+# para casar frases como "o senhorio dispensa a apresentação de fiador" sem
+# também casar um "dispensa"/"não" de outro assunto qualquer, em outra frase
+# da página, com um "fiador" mencionado bem mais adiante — era exatamente
+# esse o bug do padrão antigo "dispensa.*fiador", sem nenhum limite.
+_JANELA_PROXIMIDADE_FIADOR = r"[^.!?]{0,40}"
+
 PADROES_EXPLICITOS = [
-    r"sem fiador",
-    r"sem necessidade de fiador",
-    r"dispensa.*fiador",
-    r"não exijo fiador",
-    r"nao exijo fiador",
-    r"substitu[íi]vel por cau[çc][ãao]",
-    r"\d+\s*meses de cau[çc][ãao]",
-    r"\d+\s*rendas adiantadas",
-    r"cau[çc][ãao] refor[çc]ada",
-    r"refor[çc]o de cau[çc][ãao]"
+    r"\bsem fiador\b",
+    r"\bsem necessidade de fiador\b",
+    r"\bsem exig[êe]ncia de fiador\b",
+    # cobre "não exijo/exija" (1ª pessoa, forma irregular) e "não
+    # exige/exigem/exigia/exigimos" (demais conjugações de "exigir") antes
+    # de "fiador", com filler limitado à mesma frase.
+    rf"\bn[ãa]o\s+exi[jg]\w*{_JANELA_PROXIMIDADE_FIADOR}\bfiador\b",
+    # forma pós-posta: "fiador não é necessário/obrigatório"
+    rf"\bfiador\b{_JANELA_PROXIMIDADE_FIADOR}\bn[ãa]o\s+(?:é|e|era)\s+(?:necess[áa]ri[oa]|obrigat[óo]ri[oa])\b",
+    r"\bisent[oa]\s+de\s+fiador\b",
+    r"\bfiador\s+(?:opcional|dispens[áa]vel)\b",
+    rf"\bdispens\w*{_JANELA_PROXIMIDADE_FIADOR}\bfiador\b",
+    r"\bsubstitu[íi]vel por cau[çc][ãa]o\b",
+    r"\bcau[çc][ãa]o refor[çc]ada\b",
+    r"\brefor[çc]o de cau[çc][ãa]o\b",
 ]
 
 def limpar_texto_cookie_banner(texto: str) -> str:
@@ -67,12 +80,19 @@ def extrair_bloco_do_anuncio(texto: str) -> str:
 
 
 def extrair_tipologia(titulo: str, texto: str) -> str:
+    """Deduz a tipologia (T1, T2, ...) a partir do título e do texto do anúncio.
+
+    Havia um 3º padrão de reserva que casava o primeiro número solto em
+    qualquer parte do título/texto (ex.: o "60" de "Rua Tal, 60", ou o "2"
+    de "a 2 minutos da estação"), virando "T60"/"T2" por engano. Sem um
+    "Txx" explícito perto de uma palavra do tipo de imóvel, é mais seguro
+    devolver "Indefinida" do que adivinhar a partir de um número qualquer.
+    """
     texto_total = f"{titulo} {texto or ''}".lower()
 
     padroes = [
         r"\b(?:apartamento|casa|moradia|studio|loft|imóvel|imovel)\s*(?:t|tipo)?\s*(t?\d+[a-z]?)\b",
         r"\b(t\d+[a-z]?)\b",
-        r"\b(\d+[a-z]?)\b",
     ]
 
     for padrao in padroes:
@@ -80,24 +100,29 @@ def extrair_tipologia(titulo: str, texto: str) -> str:
         if not match:
             continue
 
-        valor = (match.group(1) or match.group(2) or "").strip().lower()
-        valor = valor.replace("tipo ", "").replace(" ", "")
+        valor = match.group(1).strip()
 
         if valor.startswith("t"):
             valor_normalizado = valor.upper()
             if re.match(r"^T\d+[A-Z]?$", valor_normalizado):
                 return valor_normalizado
-
-        if re.match(r"^\d+[a-z]?$", valor):
+        elif re.match(r"^\d+[a-z]?$", valor):
             return f"T{valor.rstrip('abcdefghijklmnopqrstuvwxyz').upper()}"
-
-        if re.match(r"^t\d+[a-z]?$", valor):
-            return valor.upper()
 
     return "Indefinida"
 
 
 def extrair_tipo_anunciante(texto: str) -> str:
+    """Adivinha o tipo de anunciante a partir do texto livre da descrição.
+
+    É um fallback: o idealista expõe esse dado de forma estruturada no
+    elemento ".professional-name" da página de detalhe (ver
+    `extrair_tipo_anunciante_pagina`), que é bem mais confiável do que
+    procurar as palavras "particular"/"profissional" soltas no texto —
+    elas podem aparecer em frases sem relação nenhuma com o tipo de
+    anunciante (ex.: "estacionamento particular", "acabamento profissional").
+    Isto só é usado quando aquele elemento não é encontrado na página.
+    """
     if not texto or not texto.strip():
         return "Desconhecido"
 
@@ -351,6 +376,27 @@ async def extrair_data_atualizacao_pagina(page) -> str | None:
     return extrair_data_atualizacao(texto)
 
 
+async def extrair_tipo_anunciante_pagina(page) -> str | None:
+    """Lê o rótulo "Particular"/"Profissional" exibido junto ao nome do anunciante.
+
+    É a fonte de dados preferida (bem mais confiável que adivinhar a partir
+    da descrição livre, ver `extrair_tipo_anunciante`); retorna None quando
+    a página não expõe o elemento, para o chamador cair no fallback.
+    """
+    try:
+        el = await page.wait_for_selector(".professional-name", timeout=5000)
+        texto = (await el.inner_text()).strip()
+    except Exception:
+        texto = ""
+
+    primeira_linha = texto.splitlines()[0].strip().lower() if texto else ""
+    if "particular" in primeira_linha:
+        return "Particular"
+    if "profissional" in primeira_linha:
+        return "Profissional"
+    return None
+
+
 async def extrair_proxima_pagina(page):
     seletores = [
         "a[rel='next']",
@@ -455,7 +501,10 @@ async def raspar_idealista_porto(url_base: str | None = None, store: Storage | N
                 data_atualizacao = await extrair_data_atualizacao_pagina(detalhe_page)
 
                 passou_filtro, status_match, trecho_status = analisar_fiador(descricao_completa)
-                tipo_anunciante = extrair_tipo_anunciante(descricao_completa)
+                tipo_anunciante = (
+                    await extrair_tipo_anunciante_pagina(detalhe_page)
+                    or extrair_tipo_anunciante(descricao_completa)
+                )
 
                 store.log_mensagem(f"  -> CLASSIFICADO [{status_match}] [{tipo_anunciante}]: {titulo}")
                 if trecho_status:

@@ -45,6 +45,13 @@ class TestExtrairTipologia:
     def test_sem_tipologia_retorna_indefinida(self):
         assert scraper.extrair_tipologia("Excelente oportunidade", "sem indicação de tipologia aqui") == "Indefinida"
 
+    def test_numero_de_rua_nao_e_confundido_com_tipologia(self):
+        # Regressão: havia um padrão de reserva que pegava o primeiro número
+        # solto no texto (aqui, o "60" do número da porta), virando "T60".
+        titulo = "Arrendamento de apartamento na Rua de Faria Guimarães, 60"
+        texto = "Fica a 2 minutos da estação de metro. Excelente localização."
+        assert scraper.extrair_tipologia(titulo, texto) == "Indefinida"
+
 
 class TestExtrairTipoAnunciante:
     def test_detecta_particular(self):
@@ -106,6 +113,108 @@ class TestAnalisarFiador:
         assert passou is True
         assert status == "EXIGE FIADOR"
         assert trecho is not None
+
+    def test_mencao_de_meses_de_caucao_nao_confirma_dispensa_de_fiador(self):
+        # Regressão: "X meses de caução" é uma cláusula de pagamento comum e
+        # NÃO significa que o fiador foi dispensado — não deve ser
+        # confundida com "caução reforçada" (que substitui o fiador).
+        texto = "Descrição: Condições de arrendamento: 2 meses de renda 2 meses de caução Fiador."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "EXIGE FIADOR"
+
+    def test_mencao_de_rendas_adiantadas_nao_confirma_dispensa_de_fiador(self):
+        texto = "Descrição: são exigidas 3 rendas adiantadas e fiador para aprovação do contrato."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "EXIGE FIADOR"
+
+    def test_caucao_reforcada_ainda_confirma_dispensa_de_fiador(self):
+        texto = "Descrição: aceita-se caução reforçada em substituição do fiador."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_reforco_de_caucao_confirma_dispensa_de_fiador(self):
+        # Regressão: "cau[çc][ãao]" faltava um caractere para casar com a
+        # palavra "caução" (ç+ã+o) antes do espaço seguinte, então esse
+        # padrão nunca disparava em texto real acentuado.
+        texto = "Descrição: aceitamos reforço de caução em vez de fiador."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_substituivel_por_caucao_confirma_dispensa_de_fiador(self):
+        texto = "Descrição: fiador substituível por caução reforçada, sem problema."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_nao_exige_fiador_terceira_pessoa_confirma(self):
+        # Regressão: só "não exijo fiador" (1ª pessoa) era reconhecido; a
+        # forma bem mais comum em anúncios, na 3ª pessoa ("não exige"),
+        # não tinha nenhum padrão correspondente e caía em EXIGE FIADOR.
+        texto = "Descrição: o senhorio não exige fiador para este contrato."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_nao_exigimos_apresentacao_de_fiador_confirma(self):
+        texto = "Descrição: não exigimos a apresentação de fiador ao inquilino."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_fiador_nao_e_necessario_forma_pos_posta_confirma(self):
+        texto = "Descrição: fiador não é necessário para este imóvel."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_fiador_nao_e_obrigatorio_forma_pos_posta_confirma(self):
+        texto = "Descrição: fiador não é obrigatório neste contrato."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_isento_de_fiador_confirma(self):
+        texto = "Descrição: imóvel isento de fiador."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_fiador_opcional_confirma(self):
+        texto = "Descrição: fiador opcional, sujeito a análise de crédito."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_dispensa_fiador_com_texto_pelo_meio_confirma(self):
+        texto = "Descrição: o proprietário dispensa a apresentação de fiador para este arrendamento."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_dispensa_de_assunto_nao_relacionado_nao_confirma_fiador(self):
+        # Regressão: o padrão antigo "dispensa.*fiador" não tinha limite de
+        # distância, então um "dispensa" sobre outro assunto qualquer,
+        # numa frase completamente diferente, casava com um "fiador"
+        # exigido bem mais adiante no texto.
+        texto = (
+            "Descrição: O condomínio dispensa a limpeza extra este mês. "
+            "Foto profissional. Foi pedido ao inquilino anterior fiador "
+            "e vamos manter essa exigência."
+        )
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "EXIGE FIADOR"
+
+    def test_sem_outro_atributo_na_mesma_frase_do_fiador_nao_confirma(self):
+        # "sem" aqui qualifica "mobília", não "fiador" — não deve confirmar.
+        texto = "Descrição: apartamento sem mobília, com fiador obrigatório."
+        passou, status, trecho = scraper.analisar_fiador(texto)
+        assert passou is True
+        assert status == "EXIGE FIADOR"
 
 
 class TestExtrairDataAtualizacao:

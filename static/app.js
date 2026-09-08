@@ -19,9 +19,10 @@ const els = {
 let cachedData = [];
 let pollTimer = null;
 
-function statusClass(status) {
-  if (status.includes('CONFIRMADO')) return 'match';
-  if (status.includes('SEM MENÇÃO')) return 'sem';
+function statusClass(item) {
+  if (item.passou_filtro === false) return 'warning';
+  if (item.status.includes('CONFIRMADO')) return 'match';
+  if (item.status.includes('SEM MENÇÃO')) return 'sem';
   return 'ignored';
 }
 
@@ -79,9 +80,22 @@ function applySort(data) {
   });
 }
 
+function avisoFalhaAnalise(item) {
+  if (item.status === 'BLOQUEADO_POR_ANTI_BOT') {
+    return 'A página caiu numa proteção anti-bot (Cloudflare, captcha, etc.) durante a varredura e não pôde ser lida corretamente.';
+  }
+  if (item.status === 'ERRO_TEXTO_VAZIO') {
+    return 'Não foi possível extrair texto desta página durante a varredura.';
+  }
+  return 'A análise automática desta página falhou.';
+}
+
 function render() {
   const filtered = applySort(applyFilters(cachedData));
-  els.summary.textContent = `${filtered.length} anúncio(s) encontrado(s)`;
+  const comFalha = filtered.filter(item => item.passou_filtro === false).length;
+  els.summary.textContent = comFalha
+    ? `${filtered.length} anúncio(s) encontrado(s) (${comFalha} com aviso de falha na análise)`
+    : `${filtered.length} anúncio(s) encontrado(s)`;
 
   if (!filtered.length) {
     els.results.innerHTML = '<div class="empty">Nenhum anúncio para este filtro.</div>';
@@ -91,11 +105,16 @@ function render() {
   els.results.innerHTML = filtered.map(item => `
     <div class="card ${item.favorito ? 'is-favorito' : ''}" data-link="${item.link}">
       <div class="card-header">
-        <div class="badge ${statusClass(item.status)}">${item.status}</div>
+        <div class="badge ${statusClass(item)}">${item.status}</div>
         <button class="fav-btn ${item.favorito ? 'active' : ''}" data-link="${item.link}" type="button" aria-pressed="${item.favorito}">
           ${item.favorito ? '★ Favorito' : '☆ Favoritar'}
         </button>
       </div>
+      ${item.passou_filtro === false ? `
+        <div class="warning-banner">
+          ⚠️ ${avisoFalhaAnalise(item)} O status acima não reflete se este anúncio exige fiador — considere reexecutar o scraper mais tarde ou abrir o anúncio manualmente.
+        </div>
+      ` : ''}
       <h2 class="titulo">${item.titulo}</h2>
       <div class="meta"><strong>Tipologia:</strong> ${item.tipologia || 'Indefinida'}</div>
       <div class="meta"><strong>Anunciante:</strong> ${item.tipo_anunciante || 'Desconhecido'}</div>

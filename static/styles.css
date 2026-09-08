@@ -12,6 +12,9 @@
   --gray: #e5e7eb;
   --gray-text: #374151;
   --amber: #f59e0b;
+  --red: #fee2e2;
+  --red-text: #991b1b;
+  --red-line: #fecaca;
 }
 
 * { box-sizing: border-box; }
@@ -168,6 +171,17 @@ button:disabled {
 .match { background: var(--green); color: var(--green-text); }
 .sem { background: #e0f2fe; color: #075985; }
 .ignored { background: var(--yellow); color: var(--yellow-text); }
+.warning { background: var(--red); color: var(--red-text); }
+.warning-banner {
+  background: var(--red);
+  color: var(--red-text);
+  border: 1px solid var(--red-line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 10px 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
 .fav-btn {
   background: var(--gray);
   color: var(--gray-text);
