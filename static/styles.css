@@ -115,10 +115,14 @@ button:disabled {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 12px;
+  row-gap: 10px;
 }
-.filters-row button {
-  margin-left: 8px;
+.filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 .favoritos-only {
   display: inline-flex;

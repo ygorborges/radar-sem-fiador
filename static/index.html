@@ -31,19 +31,27 @@
 
     <div class="toolbar">
       <div class="filters-row">
-        <label for="statusFilter">Filtrar por status de fiador:</label>
-        <select id="statusFilter"></select>
-        <label for="tipologiaFilter" style="margin-left: 12px;">Tipologia:</label>
-        <select id="tipologiaFilter"></select>
-        <label for="anuncianteFilter" style="margin-left: 12px;">Anunciante:</label>
-        <select id="anuncianteFilter"></select>
-        <label for="sortOrder" style="margin-left: 12px;">Ordenar por:</label>
-        <select id="sortOrder">
-          <option value="padrao">Padrão</option>
-          <option value="data_desc">Data de atualização (mais recente)</option>
-          <option value="data_asc">Data de atualização (mais antiga)</option>
-        </select>
-        <label class="favoritos-only" style="margin-left: 12px;">
+        <span class="filter-group">
+          <label for="statusFilter">Filtrar por status de fiador:</label>
+          <select id="statusFilter"></select>
+        </span>
+        <span class="filter-group">
+          <label for="tipologiaFilter">Tipologia:</label>
+          <select id="tipologiaFilter"></select>
+        </span>
+        <span class="filter-group">
+          <label for="anuncianteFilter">Anunciante:</label>
+          <select id="anuncianteFilter"></select>
+        </span>
+        <span class="filter-group">
+          <label for="sortOrder">Ordenar por:</label>
+          <select id="sortOrder">
+            <option value="padrao">Padrão</option>
+            <option value="data_desc">Data de atualização (mais recente)</option>
+            <option value="data_asc">Data de atualização (mais antiga)</option>
+          </select>
+        </span>
+        <label class="favoritos-only">
           <input id="favoritosOnlyFilter" type="checkbox" />
           Somente favoritos
         </label>
