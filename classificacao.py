@@ -33,11 +33,48 @@ PADROES_EXPLICITOS = [
     # forma pós-posta: "fiador não é necessário/obrigatório"
     rf"\b{_FIADOR}\b{_JANELA_PROXIMIDADE_FIADOR}\bn[ãa]o\s+(?:é|e|era)\s+(?:necess[áa]ri[oa]|obrigat[óo]ri[oa])\b",
     rf"\bisent[oa]\s+de\s+{_FIADOR}\b",
-    rf"\b{_FIADOR}\s+(?:opcional|dispens[áa]vel)\b",
+    # "na ausência de fiador[es] (terá de ser analisado/aceite/...)" — o
+    # senhorio prevê o caso de não haver fiador e trata como situação a
+    # avaliar, não como impeditivo. Regressão: um anúncio real ("Na ausência
+    # de Fiador terá de ser analisado 4 rendas...") caía em EXIGE FIADOR
+    # porque nenhum padrão cobria essa construção.
+    rf"\bna\s+aus[êe]ncia\s+d[eo]\s+{_FIADOR}\b",
+    # mesma ideia da "ausência de fiador", mas na forma condicional "caso/se
+    # não tenha fiador". Regressão: anúncio real ("Nos casos em que não
+    # tenha fiador, poderemos analisar os comprovativos do Inquilino e
+    # reavaliar as condições.") caía em EXIGE FIADOR.
+    rf"\bn[ãa]o\s+(?:tenha|tiver|tenham|tiverem|tem|t[êe]m|tinha)\s+{_FIADOR}\b",
+    # "não pedimos/exigimos/solicitamos ... nem fiador" — a negação inicial
+    # (não + verbo) se estende ao fiador via "nem". Regressão: anúncio real
+    # ("Não pedimos caução nem fiador, somente os quatro meses de
+    # entrada...") caía em EXIGE FIADOR porque só "sem fiador" era coberto,
+    # não "não ... nem fiador".
+    rf"\bn[ãa]o\b{_JANELA_PROXIMIDADE_FIADOR}\bnem\s+{_FIADOR}\b",
+    # janela curta (não a frase toda) entre "fiador" e "opcional/dispensável":
+    # cobre "fiador dispensável" (colado, forma original) e "fiador poderá/
+    # pode ser dispensável" (com o verbo pelo meio), mas não uma frase mais
+    # longa onde "dispensável" na verdade qualifica outra coisa (ex.: "fiador
+    # obrigatório, mas o depósito é dispensável"). Regressão: anúncio real
+    # ("Fiador poderá ser dispensável após análise da proposta") caía em
+    # EXIGE FIADOR porque o padrão antigo exigia adjacência total.
+    rf"\b{_FIADOR}\s+(?:pod(?:e|er[áa])\s+ser\s+)?(?:opcional|dispens[áa]vel)\b",
     rf"\bdispens\w*{_JANELA_PROXIMIDADE_FIADOR}\b{_FIADOR}\b",
     r"\bsubstitu[íi]vel por cau[çc][ãa]o\b",
     r"\bcau[çc][ãa]o refor[çc]ada\b",
     r"\brefor[çc]o de cau[çc][ãa]o\b",
+    # "fiador ou caução" — apresenta as duas opções lado a lado, ou seja,
+    # fiador é substituível por caução. Regressão: anúncio real ("Fiador ou
+    # caução no valor equivalente a 3 meses de renda.") caía em EXIGE
+    # FIADOR.
+    rf"\b{_FIADOR}\s+ou\s+cau[çc][ãa]o\b",
+    # "fiador se necessário" — condiciona a exigência a uma análise, não é
+    # uma exigência incondicional. Adjacência exigida (sem janela) porque
+    # "se necessário" solto em outro ponto da frase costuma qualificar outra
+    # coisa (ex.: documentos extra), não o fiador em si.
+    rf"\b{_FIADOR}\s+se\s+necess[áa]rio\b",
+    # "poderá/pode ser solicitado/pedido/exigido fiador" — pedido
+    # condicionado a uma análise prévia, não uma exigência de partida.
+    rf"\bpod(?:e|er[áa])\s+ser\s+(?:solicitad|pedid|exigid)[oa]\s+{_FIADOR}\b",
 ]
 
 
@@ -173,6 +210,23 @@ def extrair_trecho_status(texto: str, padrao: str | None = None) -> str | None:
     inicio = max(0, match.start() - 90)
     fim = min(len(texto_normalizado), match.end() + 220)
     return texto_normalizado[inicio:fim].strip()
+
+
+TAMANHO_DESCRICAO_TRUNCADA_ANTIGA = 253
+
+
+def descricao_parece_truncada(descricao: str) -> bool:
+    """Detecta a descrição truncada em ~250 caracteres do formato antigo.
+
+    Anúncios coletados antes da descrição completa ser guardada (ver
+    `scraper.py`) ficaram com só um recorte de 250 caracteres + reticências
+    salvo permanentemente. A assinatura é bem específica — tamanho exato e
+    termina em "..." — pra não confundir com uma descrição de verdade que só
+    termine com reticências por coincidência.
+    """
+    if not descricao:
+        return False
+    return len(descricao) == TAMANHO_DESCRICAO_TRUNCADA_ANTIGA and descricao.endswith("...")
 
 
 def detectar_bloqueio(texto: str) -> bool:

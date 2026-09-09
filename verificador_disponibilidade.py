@@ -8,14 +8,19 @@ os que já não estão disponíveis. O histórico de links visitados não é
 alterado, então o scraper continua sem revisitar esse anúncio no futuro.
 
 A verificação em si (checar se a página indica que o anúncio acabou) é
-genérica entre fontes. Só uma coisa é específica por site: aproveitando que
-a página já está aberta mesmo, também preenchemos (ou completamos, se o
-formato mudou desde a última vez) a localização de anúncios que ainda não
-a têm por completo — coletados antes dessa funcionalidade existir, cuja
-geocodificação falhou da primeira vez, ou processados antes de um campo novo
-(ex.: concelho/freguesia) ser adicionado — reaproveitando as mesmas funções
-`extrair_localizacao_pagina` de cada scraper (ver `_EXTRATORES_LOCALIZACAO`
-e `_localizacao_incompleta`).
+genérica entre fontes. Duas coisas são específicas por site, mas ambas
+aproveitam que a página já está aberta mesmo, então cabem aqui em vez de
+precisar de uma varredura nova:
+
+1. Preencher (ou completar, se o formato mudou desde a última vez) a
+   localização de anúncios que ainda não a têm por completo — reaproveitando
+   as mesmas funções `extrair_localizacao_pagina` de cada scraper (ver
+   `_EXTRATORES_LOCALIZACAO` e `_localizacao_incompleta`).
+2. Trocar a descrição truncada em 250 caracteres (formato usado antes da
+   descrição completa ser guardada) pela versão completa, reclassificando o
+   anúncio em cima do texto novo — usando `extrair_dados_detalhe` de cada
+   scraper (ver `_EXTRATORES_DESCRICAO` e
+   `classificacao.descricao_parece_truncada`).
 """
 from __future__ import annotations
 
@@ -27,7 +32,7 @@ from playwright.async_api import async_playwright
 
 import scraper
 import scraper_imovirtual
-from classificacao import detectar_anuncio_indisponivel
+from classificacao import analisar_fiador, descricao_parece_truncada, detectar_anuncio_indisponivel
 from storage import Storage, default_storage
 
 TEMPO_ENTRE_VERIFICACOES = 2.0
@@ -36,6 +41,28 @@ _EXTRATORES_LOCALIZACAO = {
     "idealista": scraper.extrair_localizacao_pagina,
     "imovirtual": scraper_imovirtual.extrair_localizacao_pagina,
 }
+
+
+async def _extrair_descricao_atual(fonte: str, page) -> str | None:
+    """Reextrai a descrição completa da página atualmente aberta em `page`.
+
+    Cada scraper devolve os dados de detalhe num formato diferente (tupla no
+    idealista, dict no Imovirtual) — esta função normaliza os dois pro mesmo
+    formato (só a descrição), que é tudo que a reclassificação precisa.
+    """
+    if fonte == "idealista":
+        try:
+            _, _, descricao = await scraper.extrair_dados_detalhe(page)
+        except Exception:
+            return None
+        return descricao
+    if fonte == "imovirtual":
+        try:
+            dados = await scraper_imovirtual.extrair_dados_detalhe(page)
+        except Exception:
+            return None
+        return dados.get("descricao")
+    return None
 
 
 def _localizacao_incompleta(item: dict) -> bool:
@@ -128,16 +155,26 @@ async def verificar_disponibilidade(
                 store.log_mensagem(f"  -> Removido da lista (arrendado ou fora do ar): {link}")
                 store.remover_resultado(fonte, link)
                 removidos.append(item)
-            elif _localizacao_incompleta(item):
-                extrator = _EXTRATORES_LOCALIZACAO.get(fonte)
-                if extrator:
-                    try:
-                        localizacao = await extrator(page, store)
-                    except Exception as e:
-                        store.log_mensagem(f"  -> Erro ao geolocalizar {link}: {e}")
-                        localizacao = None
-                    if localizacao:
-                        store.atualizar_localizacao(fonte, link, localizacao)
+            else:
+                if _localizacao_incompleta(item):
+                    extrator_localizacao = _EXTRATORES_LOCALIZACAO.get(fonte)
+                    if extrator_localizacao:
+                        try:
+                            localizacao = await extrator_localizacao(page, store)
+                        except Exception as e:
+                            store.log_mensagem(f"  -> Erro ao geolocalizar {link}: {e}")
+                            localizacao = None
+                        if localizacao:
+                            store.atualizar_localizacao(fonte, link, localizacao)
+
+                if descricao_parece_truncada(item.get("descricao")):
+                    nova_descricao = await _extrair_descricao_atual(fonte, page)
+                    if nova_descricao and not descricao_parece_truncada(nova_descricao):
+                        passou_filtro, status, trecho = analisar_fiador(nova_descricao)
+                        store.atualizar_descricao_e_classificacao(
+                            fonte, link, nova_descricao, status, trecho, passou_filtro
+                        )
+                        store.log_mensagem(f"  -> Descrição completa recuperada e reclassificada: {link}")
 
             if progress_callback:
                 progress_callback(i, len(a_verificar))

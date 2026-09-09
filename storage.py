@@ -194,6 +194,26 @@ class Storage:
                 self.guardar_resultados(fonte, resultados)
                 return
 
+    def atualizar_descricao_e_classificacao(
+        self, fonte: str, link: str, descricao: str, status: str, trecho_status: str | None, passou_filtro: bool
+    ) -> None:
+        """Substitui a descrição de um anúncio já guardado e a reclassifica.
+
+        Usado pela verificação periódica para trocar a descrição truncada em
+        250 caracteres (formato antigo, ver `classificacao.descricao_parece_truncada`)
+        pela versão completa, já reclassificada em cima do texto novo. Não
+        faz nada se o link não existir na fonte.
+        """
+        resultados = self.carregar_resultados(fonte)
+        for item in resultados:
+            if item.get("link") == link:
+                item["descricao"] = descricao
+                item["status"] = status
+                item["trecho_status"] = trecho_status
+                item["passou_filtro"] = passou_filtro
+                self.guardar_resultados(fonte, resultados)
+                return
+
     # ---- Cache de geocodificação (partilhado entre fontes) --------------------
 
     def carregar_cache_geocodificacao(self) -> dict:

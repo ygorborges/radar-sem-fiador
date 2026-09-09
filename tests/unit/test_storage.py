@@ -134,6 +134,39 @@ class TestResultados:
         store.atualizar_localizacao("idealista", "https://a.pt/nao-existe", {"lat": 1, "lon": 2})
         assert store.carregar_resultados("idealista") == dados
 
+    def test_atualizar_descricao_e_classificacao_substitui_os_campos_relacionados(self, store):
+        store.guardar_resultados("idealista", [{
+            "titulo": "Anúncio",
+            "link": "https://a.pt/1",
+            "descricao": "x" * 250 + "...",
+            "status": "EXIGE FIADOR",
+            "trecho_status": "fiador",
+            "passou_filtro": True,
+        }])
+
+        store.atualizar_descricao_e_classificacao(
+            "idealista", "https://a.pt/1",
+            descricao="Descrição completa de verdade, sem menção a esse assunto.",
+            status="SEM MENÇÃO (Não cita fiador)",
+            trecho_status=None,
+            passou_filtro=True,
+        )
+
+        resultado = store.carregar_resultados("idealista")[0]
+        assert resultado["descricao"] == "Descrição completa de verdade, sem menção a esse assunto."
+        assert resultado["status"] == "SEM MENÇÃO (Não cita fiador)"
+        assert resultado["trecho_status"] is None
+        assert resultado["titulo"] == "Anúncio"
+
+    def test_atualizar_descricao_e_classificacao_com_link_inexistente_nao_faz_nada(self, store):
+        dados = [{"titulo": "Anúncio", "link": "https://a.pt/1", "descricao": "x"}]
+        store.guardar_resultados("idealista", dados)
+        store.atualizar_descricao_e_classificacao(
+            "idealista", "https://a.pt/nao-existe", descricao="y", status="SEM MENÇÃO (Não cita fiador)",
+            trecho_status=None, passou_filtro=True,
+        )
+        assert store.carregar_resultados("idealista") == dados
+
 
 class TestCacheGeocodificacao:
     def test_cache_vazio_quando_nao_existe(self, store):

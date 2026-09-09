@@ -12,8 +12,14 @@ import asyncio
 
 import pytest
 
+import scraper
+import scraper_imovirtual
 from storage import Storage
-from verificador_disponibilidade import _anuncio_ainda_disponivel, _localizacao_incompleta
+from verificador_disponibilidade import (
+    _anuncio_ainda_disponivel,
+    _extrair_descricao_atual,
+    _localizacao_incompleta,
+)
 
 
 @pytest.fixture
@@ -77,3 +83,37 @@ class TestLocalizacaoIncompleta:
     def test_localizacao_completa_nao_e_incompleta(self):
         item = {"localizacao": {"lat": 41.15, "lon": -8.61, "preciso": True, "texto": "Rua X", "concelho": "Porto", "freguesia": "Bonfim"}}
         assert _localizacao_incompleta(item) is False
+
+
+class TestExtrairDescricaoAtual:
+    """`_extrair_descricao_atual` só normaliza o formato de retorno de cada
+    scraper (tupla no idealista, dict no Imovirtual) — a extração em si já é
+    testada nos próprios scrapers, então aqui os `extrair_dados_detalhe`
+    reais são substituídos por dublês.
+    """
+
+    def test_idealista_desempacota_a_tupla(self, monkeypatch):
+        async def fake_extrair(page):
+            return "Título", "800 €/mês", "Descrição completa de teste."
+
+        monkeypatch.setattr(scraper, "extrair_dados_detalhe", fake_extrair)
+        resultado = asyncio.run(_extrair_descricao_atual("idealista", page=None))
+        assert resultado == "Descrição completa de teste."
+
+    def test_imovirtual_le_a_chave_do_dict(self, monkeypatch):
+        async def fake_extrair(page):
+            return {"titulo": "Título", "preco": "800 €/mês", "descricao": "Descrição completa de teste."}
+
+        monkeypatch.setattr(scraper_imovirtual, "extrair_dados_detalhe", fake_extrair)
+        resultado = asyncio.run(_extrair_descricao_atual("imovirtual", page=None))
+        assert resultado == "Descrição completa de teste."
+
+    def test_erro_na_extracao_devolve_none(self, monkeypatch):
+        async def fake_extrair_com_erro(page):
+            raise RuntimeError("falha simulada")
+
+        monkeypatch.setattr(scraper, "extrair_dados_detalhe", fake_extrair_com_erro)
+        assert asyncio.run(_extrair_descricao_atual("idealista", page=None)) is None
+
+    def test_fonte_desconhecida_devolve_none(self):
+        assert asyncio.run(_extrair_descricao_atual("olx", page=None)) is None

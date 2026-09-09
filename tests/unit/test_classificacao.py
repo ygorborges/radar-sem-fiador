@@ -79,6 +79,30 @@ class TestDetectarBloqueio:
         assert classificacao.detectar_bloqueio("") is False
 
 
+class TestDescricaoPareceTruncada:
+    def test_descricao_no_tamanho_exato_com_reticencias_e_truncada(self):
+        descricao = "x" * 250 + "..."
+        assert len(descricao) == 253
+        assert classificacao.descricao_parece_truncada(descricao) is True
+
+    def test_descricao_curta_de_verdade_nao_e_truncada(self):
+        assert classificacao.descricao_parece_truncada("Apartamento pequeno, sem mais detalhes.") is False
+
+    def test_descricao_longa_terminando_em_reticencias_nao_e_truncada(self):
+        # Só o tamanho exato (253) + reticências caracteriza o formato antigo;
+        # uma descrição de verdade que termine com "..." por acaso não conta.
+        descricao = "y" * 400 + "..."
+        assert classificacao.descricao_parece_truncada(descricao) is False
+
+    def test_descricao_no_tamanho_certo_sem_reticencias_nao_e_truncada(self):
+        descricao = "z" * 253
+        assert classificacao.descricao_parece_truncada(descricao) is False
+
+    def test_descricao_vazia_nao_e_truncada(self):
+        assert classificacao.descricao_parece_truncada("") is False
+        assert classificacao.descricao_parece_truncada(None) is False
+
+
 class TestDetectarAnuncioIndisponivel:
     def test_detecta_anuncio_ja_nao_disponivel(self):
         assert classificacao.detectar_anuncio_indisponivel("Este anúncio já não está disponível.") is True
@@ -194,6 +218,97 @@ class TestAnalisarFiador:
 
     def test_fiador_nao_e_necessario_forma_pos_posta_confirma(self):
         texto = "Descrição: fiador não é necessário para este imóvel."
+        passou, status, trecho = classificacao.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_na_ausencia_de_fiador_confirma(self):
+        # Regressão: anúncio real (idealista.pt/imovel/33684613/) com "Na
+        # ausência de Fiador terá de ser analisado 4 rendas, 2 rendas + 2
+        # rendas..." caía em EXIGE FIADOR — nenhum padrão cobria essa
+        # construção, que na verdade descreve uma alternativa (mais rendas
+        # adiantadas) prevista para quando não há fiador.
+        texto = (
+            "Descrição: Necessário apresentar comprovativo de rendimentos. "
+            "Na ausência de Fiador terá de ser analisado 4 rendas, 2 rendas + 2 rendas."
+        )
+        passou, status, trecho = classificacao.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+        assert "ausência" in trecho.lower()
+
+    def test_na_ausencia_do_fiador_com_artigo_confirma(self):
+        texto = "Descrição: na ausência do fiador, aceitamos caução adicional."
+        passou, status, trecho = classificacao.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_nao_tenha_fiador_forma_condicional_confirma(self):
+        # Regressão: anúncio real (idealista.pt/imovel/35012945/) com "Nos
+        # casos em que não tenha fiador, poderemos analisar os comprovativos
+        # do Inquilino e reavaliar as condições." caía em EXIGE FIADOR.
+        texto = (
+            "Descrição: Condições: 2 rendas + 2 cauções + fiador. Nos casos em que não "
+            "tenha fiador, poderemos analisar os comprovativos do Inquilino e reavaliar as condições."
+        )
+        passou, status, trecho = classificacao.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_nao_pedimos_caucao_nem_fiador_confirma(self):
+        # Regressão: anúncio real (idealista.pt/imovel/30793406/) com "Não
+        # pedimos caução nem fiador, somente os quatro meses de entrada..."
+        # caía em EXIGE FIADOR — só "sem fiador" era coberto, não "não ...
+        # nem fiador".
+        texto = "Descrição: Não pedimos caução nem fiador, somente os quatro meses de entrada."
+        passou, status, trecho = classificacao.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_fiador_podera_ser_dispensavel_confirma(self):
+        # Regressão: anúncio real do Imovirtual ("Fiador poderá ser
+        # dispensável após análise da proposta;") caía em EXIGE FIADOR
+        # porque o padrão antigo exigia "fiador" colado a "dispensável".
+        texto = "Descrição: Caução de 1.000€ Fiador poderá ser dispensável após análise da proposta."
+        passou, status, trecho = classificacao.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_dispensavel_com_frase_longa_pelo_meio_nao_confirma(self):
+        # A janela curta do padrão "fiador poderá/pode ser dispensável" não
+        # deve casar quando "dispensável" na verdade qualifica outra coisa,
+        # bem mais adiante na mesma frase.
+        texto = "Descrição: Fiador obrigatório, mas o depósito adicional é dispensável para quem pagar tudo adiantado."
+        passou, status, trecho = classificacao.analisar_fiador(texto)
+        assert passou is True
+        assert status == "EXIGE FIADOR"
+
+    def test_fiador_ou_caucao_como_alternativas_confirma(self):
+        # Regressão: anúncio real do Imovirtual ("Fiador ou caução no valor
+        # equivalente a 3 meses de renda.") caía em EXIGE FIADOR.
+        texto = "Descrição: Prazo de 3 anos. Fiador ou caução no valor equivalente a 3 meses de renda."
+        passou, status, trecho = classificacao.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_fiador_se_necessario_confirma(self):
+        # Regressão: anúncio real (idealista.pt/imovel/35001658/) com
+        # "Apresentar Comprovativo de rendimentos Fiador se necessário."
+        # caía em EXIGE FIADOR.
+        texto = "Descrição: Apresentar Comprovativo de rendimentos Fiador se necessário."
+        passou, status, trecho = classificacao.analisar_fiador(texto)
+        assert passou is True
+        assert status == "CONFIRMADO (Explícito/Flexível)"
+
+    def test_podera_ser_solicitado_fiador_confirma(self):
+        # Regressão: anúncio real do Imovirtual ("Poderá ser solicitado
+        # fiador, caso a análise da situação do arrendatário assim o
+        # justifique; Poderão ser avaliadas outras soluções de garantia...")
+        # caía em EXIGE FIADOR.
+        texto = (
+            "Descrição: 3 rendas + 1 renda de caução no início do contrato; Poderá ser "
+            "solicitado fiador, caso a análise da situação do arrendatário assim o justifique."
+        )
         passou, status, trecho = classificacao.analisar_fiador(texto)
         assert passou is True
         assert status == "CONFIRMADO (Explícito/Flexível)"
