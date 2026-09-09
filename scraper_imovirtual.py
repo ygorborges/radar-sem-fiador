@@ -1,4 +1,4 @@
-"""Scraper do Imovirtual — segunda fonte do RadarSemFiador.
+"""Scraper do Imovirtual — segunda fonte do RadarArrendamento.
 
 Segue os mesmos princípios do scraper do idealista (`scraper.py`): navegador
 com marcas de automação escondidas, atrasos aleatórios entre páginas e

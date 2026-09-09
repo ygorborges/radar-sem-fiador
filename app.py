@@ -1,4 +1,4 @@
-"""Aplicação web do RadarSemFiador.
+"""Aplicação web do RadarArrendamento.
 
 Processo único que serve a interface (`static/index.html`) e expõe uma API
 para configurar a URL de busca de cada fonte (idealista, imovirtual, ...),
@@ -148,6 +148,6 @@ def create_app(
 app = create_app()
 
 if __name__ == "__main__":
-    print("RadarSemFiador ativo em http://127.0.0.1:8000/")
+    print("RadarArrendamento ativo em http://127.0.0.1:8000/")
     print("Use a interface para configurar a URL de busca e disparar os scrapers.")
     app.run(host="127.0.0.1", port=8000, debug=False)

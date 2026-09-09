@@ -1,8 +1,10 @@
-# RadarSemFiador
+# RadarArrendamento
 
 Automação que varre buscas de arrendamento em múltiplos sites — hoje [idealista.pt](https://www.idealista.pt) e [Imovirtual](https://www.imovirtual.com) — e sinaliza os anúncios que **não exigem fiador** (ou nem mencionam o assunto), poupando o trabalho de abrir um por um.
 
-![Interface do RadarSemFiador](screenshots/ui-top.png)
+Esse continua sendo o foco principal por enquanto, mas o projeto já filtra bem além disso — preço, tipologia, tipo de anunciante, favoritos — e a ideia é crescer como um radar mais geral de imóveis. A visão de médio prazo inclui também a compra de imóveis, com o mesmo espírito: sinalizar ciladas comuns (imóveis devolutos, pendências judiciais, "oportunidades de investimento" duvidosas) em vez de deixar isso para o comprador descobrir sozinho.
+
+![Interface do RadarArrendamento](screenshots/ui-top.png)
 
 ## Como funciona
 
