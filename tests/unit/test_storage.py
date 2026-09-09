@@ -116,6 +116,37 @@ class TestResultados:
         assert removido is False
         assert store.carregar_resultados("idealista") == dados
 
+    def test_atualizar_localizacao_preenche_o_campo_preservando_o_resto(self, store):
+        store.guardar_resultados("idealista", [
+            {"titulo": "Anúncio", "link": "https://a.pt/1", "status": "CONFIRMADO"},
+        ])
+
+        localizacao = {"lat": 41.15, "lon": -8.61, "preciso": True, "texto": "Rua X, 10"}
+        store.atualizar_localizacao("idealista", "https://a.pt/1", localizacao)
+
+        resultado = store.carregar_resultados("idealista")[0]
+        assert resultado["localizacao"] == localizacao
+        assert resultado["status"] == "CONFIRMADO"
+
+    def test_atualizar_localizacao_com_link_inexistente_nao_faz_nada(self, store):
+        dados = [{"titulo": "Anúncio", "link": "https://a.pt/1"}]
+        store.guardar_resultados("idealista", dados)
+        store.atualizar_localizacao("idealista", "https://a.pt/nao-existe", {"lat": 1, "lon": 2})
+        assert store.carregar_resultados("idealista") == dados
+
+
+class TestCacheGeocodificacao:
+    def test_cache_vazio_quando_nao_existe(self, store):
+        assert store.carregar_cache_geocodificacao() == {}
+
+    def test_guarda_e_recarrega_cache(self, store):
+        store.guardar_cache_geocodificacao({"Rua X, Porto": [41.15, -8.61]})
+        assert store.carregar_cache_geocodificacao() == {"Rua X, Porto": [41.15, -8.61]}
+
+    def test_permite_guardar_endereco_nao_encontrado_como_none(self, store):
+        store.guardar_cache_geocodificacao({"Endereço inexistente": None})
+        assert store.carregar_cache_geocodificacao() == {"Endereço inexistente": None}
+
 
 class TestConfig:
     def test_config_padrao_quando_nao_existe(self, store):

@@ -29,3 +29,24 @@ class TestExtrairDataAtualizacao:
 
     def test_mes_invalido_retorna_none(self):
         assert scraper.extrair_data_atualizacao("Anúncio atualizado no dia 14 de Nãomes") is None
+
+
+class TestPareceEnderecoDeRua:
+    def test_rua_e_reconhecida(self):
+        assert scraper.parece_endereco_de_rua("Rua de Faria Guimarães, 60") is True
+
+    def test_avenida_e_reconhecida(self):
+        assert scraper.parece_endereco_de_rua("Avenida da Boavista, 1000") is True
+
+    def test_bairro_nao_e_confundido_com_rua(self):
+        assert scraper.parece_endereco_de_rua("Camões - Faria Guimarães") is False
+
+    def test_zona_composta_nao_e_confundida_com_rua(self):
+        assert scraper.parece_endereco_de_rua("Cedofeita - Santo Ildefonso - Sé - Miragaia - São Nicolau - Vitória") is False
+
+    def test_cidade_nao_e_confundida_com_rua(self):
+        assert scraper.parece_endereco_de_rua("Porto") is False
+
+    def test_texto_vazio_nao_e_rua(self):
+        assert scraper.parece_endereco_de_rua("") is False
+        assert scraper.parece_endereco_de_rua(None) is False

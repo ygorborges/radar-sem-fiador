@@ -17,18 +17,21 @@ A aplicação roda num **único processo Python** (`app.py`, Flask): ele serve a
    - **SEM MENÇÃO** — a palavra "fiador" nem aparece no texto.
    - **EXIGE FIADOR** — o texto menciona fiador como exigência.
    - **BLOQUEADO_POR_ANTI_BOT** / **ERRO_TEXTO_VAZIO** — a página não pôde ser lida corretamente (proteção anti-bot, página vazia, etc.); a interface mostra esses casos com um aviso visual em vez de misturá-los com classificações reais.
-4. Salva cada anúncio (com a **descrição completa**, não só um trecho) no ficheiro daquela fonte assim que ele é classificado — não espera a varredura inteira terminar. Se o processo for interrompido no meio, o que já foi analisado não se perde. A gravação mescla com o que já existia (uma varredura nunca revisita um anúncio já visto, então precisa preservar os anteriores em vez de sobrescrever).
-5. A interface combina os resultados de todas as fontes via API (`/api/results`), com filtros por **fonte**, status, tipologia, tipo de anunciante, **faixa de preço** e **favoritos**, além de ordenação por data de atualização.
+4. Também extrai a **localização** do anúncio, pra exibir no mapa: o Imovirtual já publica coordenadas prontas no JSON-LD da página; o idealista só expõe uma hierarquia de texto (rua, bairro, zona, cidade), sem coordenada — nesse caso, o nível mais específico disponível é geocodificado via Nominatim/OpenStreetMap (`geolocalizacao.py`). Quando só há bairro/zona (sem rua), a localização fica marcada como aproximada.
+5. Salva cada anúncio (com a **descrição completa**, não só um trecho) no ficheiro daquela fonte assim que ele é classificado — não espera a varredura inteira terminar. Se o processo for interrompido no meio, o que já foi analisado não se perde. A gravação mescla com o que já existia (uma varredura nunca revisita um anúncio já visto, então precisa preservar os anteriores em vez de sobrescrever).
+6. A interface combina os resultados de todas as fontes via API (`/api/results`), com filtros por **fonte**, status, tipologia, tipo de anunciante, **faixa de preço** e **favoritos**, além de ordenação por data de atualização — e um **mapa** que reflete os anúncios filtrados em tempo real.
 
 ## Arquitetura
 
 ```
 app.py                    -> processo único: serve a UI (static/) e expõe a API REST
-scrape_runner.py          -> um ScrapeJobManager por fonte, cada um numa thread em segundo plano
+scrape_runner.py          -> um ScrapeJobManager/VerificacaoJobManager por fonte, cada um numa thread em segundo plano
 classificacao.py          -> classificação de fiador e extração de tipologia/anunciante, comum a todas as fontes
 scraper.py                -> scraper do idealista.pt (navegação + extração específica do site)
 scraper_imovirtual.py     -> scraper do Imovirtual (navegação + extração específica do site)
-storage.py                -> persistência em JSON (config e resultados por fonte; histórico e favoritos partilhados)
+verificador_disponibilidade.py -> revisita anúncios já coletados: remove os que saíram do ar e preenche localização que falte
+geolocalizacao.py         -> geocodificação (Nominatim/OpenStreetMap) usada só pelo idealista, com cache em disco
+storage.py                -> persistência em JSON (config e resultados por fonte; histórico, favoritos e ocultos partilhados)
 static/                   -> interface (index.html, app.js, styles.css)
 data/                     -> ficheiros gerados em runtime (não versionados)
 tests/                    -> testes unitários e de integração (pytest)
@@ -41,14 +44,18 @@ Adicionar uma nova fonte (ex.: OLX) significa: uma entrada em `storage.FONTES`, 
 | Método | Rota                          | Descrição                                                                |
 |--------|--------------------------------|---------------------------------------------------------------------------|
 | GET    | `/`                             | Interface web                                                            |
-| GET    | `/api/results`                  | Resultados de todas as fontes combinados, cada item com `fonte` e `favorito` |
+| GET    | `/api/results`                  | Resultados de todas as fontes combinados, cada item com `fonte`, `favorito`, `oculto` e `localizacao` (quando identificada) |
 | GET    | `/api/config`                   | Config (URL padrão/atual) de cada fonte                                  |
 | POST   | `/api/config/<fonte>`           | Atualiza a URL atual daquela fonte (`{"url": "..."}`); a padrão nunca é perdida |
 | POST   | `/api/config/<fonte>/reset`     | Restaura a URL atual daquela fonte para a padrão                         |
 | GET    | `/api/favorites`                | Lista de links favoritados                                               |
 | POST   | `/api/favorites/toggle`         | Alterna favorito (`{"link": "..."}`)                                     |
+| GET    | `/api/hidden`                   | Lista de links ocultados                                                 |
+| POST   | `/api/hidden/toggle`            | Alterna ocultar/mostrar (`{"link": "..."}`)                              |
 | GET    | `/api/scrape/status`            | Estado de execução de cada fonte (`idle`/`running`/`done`/`error`)       |
 | POST   | `/api/scrape/<fonte>`           | Dispara uma execução daquela fonte com a URL atual configurada           |
+| GET    | `/api/check/status`             | Estado da verificação de disponibilidade de cada fonte                  |
+| POST   | `/api/check/<fonte>`            | Dispara a verificação daquela fonte (remove anúncios fora do ar, preenche localização em falta) |
 
 `<fonte>` é `idealista` ou `imovirtual`.
 
@@ -67,18 +74,16 @@ playwright install chromium
 python app.py
 ```
 
-Abra `http://127.0.0.1:8000/`. Na interface:
+Abra `http://127.0.0.1:8000/`. O cabeçalho tem três botões que mostram/escondem as respectivas seções (o estado de cada um fica salvo no navegador):
 
-- **Configuração da busca** (um painel por fonte): ajuste a "URL atual" (localização, preço, tipologia, etc.) e clique em **Guardar URL**. A "URL padrão" nunca é sobrescrita; use **Restaurar padrão** para voltar a ela a qualquer momento.
-- **Executar scraper**: dispara a varredura daquela fonte com a URL atual configurada. Fontes diferentes podem rodar ao mesmo tempo sem interferir uma na outra; só não é possível disparar duas execuções da *mesma* fonte simultaneamente. O botão fica desativado enquanto a execução está em curso, uma barra de progresso mostra quantos anúncios já foram analisados frente ao total encontrado (com uma estimativa de tempo restante, calculada pelo ritmo real da execução), e a interface recarrega os resultados automaticamente ao concluir.
-- **Buscar**: filtra por palavra-chave no título, na descrição completa ou no trecho decisivo do fiador.
-- **Fonte**: filtra os resultados por site de origem.
-- **Preço**: filtra por faixa mínima/máxima em euros.
-- **Favoritar**: cada anúncio tem um botão ★/☆ para marcar/desmarcar como favorito. Use o filtro "Somente favoritos" para ver só os marcados.
+- **Configurações de busca** (um painel por fonte): ajuste a "URL atual" (localização, preço, tipologia, etc.) e clique em **Guardar URL**. A "URL padrão" nunca é sobrescrita; use **Restaurar padrão** para voltar a ela a qualquer momento.
+  - **Executar scraper**: dispara a varredura daquela fonte com a URL atual configurada. Fontes diferentes podem rodar ao mesmo tempo sem interferir uma na outra; só não é possível disparar duas execuções da *mesma* fonte simultaneamente. O botão fica desativado enquanto a execução está em curso, uma barra de progresso mostra quantos anúncios já foram analisados frente ao total encontrado (com uma estimativa de tempo restante, calculada pelo ritmo real da execução), e a interface recarrega os resultados automaticamente ao concluir.
+  - **Verificar anúncios ativos**: revisita os anúncios já coletados daquela fonte e **remove definitivamente** da lista os que já saíram do ar (arrendados ou removidos pelo anunciante) — aproveitando a mesma visita, também preenche a localização de anúncios que ainda não têm. Mesmo modelo de progresso/estado da varredura.
+- **Filtros**: busca por palavra-chave (título, descrição completa ou trecho decisivo do fiador), fonte, status de fiador, tipologia, tipo de anunciante, faixa de preço e ordenação por data de atualização. **Favoritar** (★/☆) e **Ocultar** (🙈) ficam em cada card — "Somente favoritos" e "Ver ocultos" filtram por eles; ocultar só tira da vista (não apaga nada), então "Ver ocultos" serve pra rever/desocultar depois.
+- **Mapa**: mostra num mapa (Leaflet/OpenStreetMap) os anúncios que estão passando pelos filtros no momento — atualiza sozinho a cada mudança de filtro. Um marcador de pino indica endereço preciso; um círculo translúcido indica que só a região é conhecida (o anunciante não revelou a rua). Anúncios sem localização identificada não aparecem, mas continuam na lista normalmente — rode **Verificar anúncios ativos** para preencher a localização dos que faltam.
 - **Descrição**: aparece resumida (4 linhas); clique nela para expandir/recolher o texto completo.
-- **Ordenar por**: escolha "Data de atualização (mais recente)" ou "(mais antiga)" para reordenar os cards; anúncios sem data identificada ficam sempre no fim da lista.
 
-Os arquivos gerados (`historico_anuncios.json`, `resultados_idealista.json`, `resultados_imovirtual.json`, `config.json`, `favoritos.json`, `scraper_log.txt`) ficam em `data/` e não são versionados.
+Os arquivos gerados (`historico_anuncios.json`, `resultados_idealista.json`, `resultados_imovirtual.json`, `config.json`, `favoritos.json`, `ocultos.json`, `geocode_cache.json`, `scraper_log.txt`) ficam em `data/` e não são versionados.
 
 ## Testes
 
@@ -91,7 +96,9 @@ pytest
 - `tests/unit/test_scraper_parsing.py` — extração específica do idealista (data de atualização a partir do texto "Anúncio atualizado no dia...").
 - `tests/unit/test_scraper_playwright_helpers.py` — extratores assíncronos do idealista que dependem de uma `page` (com um dublê no lugar do Playwright real).
 - `tests/unit/test_scraper_imovirtual_parsing.py` — extração específica do Imovirtual: paginação (`page=N`, incluindo o caso em que o site "clampa" para a última página existente), data de atualização (formato `D.MM.AAAA`, já com ano), parsing do JSON-LD estruturado, e a normalização de links promovidos (`/hpr/...`) que apontam pro mesmo anúncio.
-- `tests/unit/test_storage.py` — persistência por fonte (resultados, config) e partilhada (histórico, favoritos), incluindo a migração automática do formato antigo de `config.json`.
+- `tests/unit/test_storage.py` — persistência por fonte (resultados, config) e partilhada (histórico, favoritos, ocultos, cache de geocodificação), incluindo a migração automática do formato antigo de `config.json`.
+- `tests/unit/test_geolocalizacao.py` — geocodificação via Nominatim (sucesso, sem resultado, falha de rede) e o cache em disco, com a chamada HTTP sempre substituída por um dublê (nunca bate na rede de verdade).
+- `tests/unit/test_verificador_disponibilidade.py` — decisão de disponibilidade a partir de status HTTP/texto da página.
 - `tests/unit/test_scrape_runner.py` — orquestração da execução em segundo plano por fonte: sucesso, erro, progresso e ETA reportados durante a execução, bloqueio de execuções concorrentes da mesma fonte, e independência entre fontes diferentes.
 - `tests/integration/test_api.py` — todas as rotas da API Flask via test client, incluindo o fluxo completo por fonte.
 
@@ -103,6 +110,8 @@ pytest
 - Tudo que os scrapers fazem (páginas visitadas, classificação de cada anúncio, erros) é gravado em `data/scraper_log.txt`, além de aparecer no terminal — é o primeiro lugar a olhar se algo parecer errado numa execução.
 - A página de detalhe do Imovirtual só espera o carregamento inicial do HTML (`domcontentloaded`) em vez de esperar a rede ficar ociosa (`networkidle`): medido em execução real, ~18% das páginas nunca atingiam esse estado (anúncios/scripts mantêm requisições em segundo plano) e expiravam no timeout de 20s à toa — os dados usados (JSON-LD) já vêm prontos no HTML inicial.
 - A descrição completa de cada anúncio é guardada (não só um trecho), permitindo a busca por palavra-chave no conteúdo. Anúncios já visitados em execuções antigas (antes dessa mudança) mantêm a descrição truncada de 250 caracteres que foi salva na época, já que o histórico impede revisitá-los; só uma nova execução sobre eles (ex.: limpando `historico_anuncios.json`) atualizaria para o texto completo.
+- A geocodificação (idealista) usa a API pública da Nominatim, que limita a 1 pedido por segundo e exige um User-Agent identificável — ambos respeitados em `geolocalizacao.py`. O cache em `data/geocode_cache.json` evita repetir pedidos pro mesmo endereço/bairro entre execuções.
+- Anúncios coletados antes da funcionalidade de mapa existir não têm `localizacao` até serem revisitados — rode **Verificar anúncios ativos** de cada fonte pra preencher os que faltam (ela aproveita a própria visita de verificação de disponibilidade pra isso, sem precisar de uma varredura nova).
 - Projeto pessoal para uso educacional — respeite os termos de uso de cada site e evite varreduras agressivas.
 
 ## Licença

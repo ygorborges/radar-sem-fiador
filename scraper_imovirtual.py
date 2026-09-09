@@ -138,6 +138,66 @@ def _extrair_do_json_ld(dados: dict) -> dict | None:
     return None
 
 
+def _extrair_localizacao_do_json_ld(dados: dict) -> dict | None:
+    """Lê `address`/`geo` do nó do anúncio no JSON-LD, quando presentes."""
+    grafo = dados.get("@graph") if isinstance(dados, dict) else None
+    if not isinstance(grafo, list):
+        return None
+
+    for node in grafo:
+        if not isinstance(node, dict):
+            continue
+        endereco = node.get("address")
+        geo = node.get("geo")
+        if not isinstance(endereco, dict) or not isinstance(geo, dict):
+            continue
+
+        lat, lon = geo.get("latitude"), geo.get("longitude")
+        if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+            continue
+
+        rua = str(endereco.get("streetAddress") or "").strip()
+        bairro = str(endereco.get("addressLocality") or "").strip()
+        texto = rua or bairro
+        if not texto:
+            continue
+
+        return {"lat": float(lat), "lon": float(lon), "preciso": bool(rua), "texto": texto}
+
+    return None
+
+
+async def extrair_localizacao_pagina(page, store=None) -> dict | None:
+    """Lê endereço/coordenadas do JSON-LD (`address`/`geo`) do Imovirtual.
+
+    Ao contrário do idealista, o Imovirtual já publica a coordenada pronta —
+    não precisa de geocodificação externa. `store` não é usado aqui; existe
+    só pra esta função ter a mesma assinatura de
+    `scraper.extrair_localizacao_pagina`, o que permite chamar qualquer uma
+    das duas genericamente por fonte (ver `verificador_disponibilidade.py`).
+    `streetAddress` vazio é o sinal de que o anunciante só informou o bairro
+    (`addressLocality`) — a coordenada aponta pra essa área, não pro prédio.
+    """
+    try:
+        scripts = await page.query_selector_all('script[type="application/ld+json"]')
+        for script in scripts:
+            try:
+                conteudo = await script.inner_text()
+                if not conteudo.strip():
+                    continue
+                dados = json.loads(conteudo)
+            except Exception:
+                continue
+
+            achado = _extrair_localizacao_do_json_ld(dados)
+            if achado:
+                return achado
+    except Exception:
+        pass
+
+    return None
+
+
 async def extrair_dados_detalhe(page) -> dict:
     """Extrai título, preço, descrição, tipologia e tipo de anunciante.
 
@@ -354,6 +414,7 @@ async def raspar_imovirtual(
                     "descricao": dados["descricao"],
                     "passou_filtro": passou_filtro,
                     "data_atualizacao": data_atualizacao,
+                    "localizacao": await extrair_localizacao_pagina(detalhe_page),
                 }
                 anuncios_filtrados.append(item)
                 # Guarda no disco assim que este anúncio é classificado, em vez

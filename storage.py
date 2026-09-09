@@ -66,6 +66,7 @@ class Storage:
         self.config_path = self.data_dir / "config.json"
         self.favoritos_path = self.data_dir / "favoritos.json"
         self.ocultos_path = self.data_dir / "ocultos.json"
+        self.geocode_cache_path = self.data_dir / "geocode_cache.json"
         self.log_path = self.data_dir / "scraper_log.txt"
         self._lock = threading.Lock()
 
@@ -176,6 +177,31 @@ class Storage:
             self.guardar_ocultos(ocultos)
 
         return True
+
+    def atualizar_localizacao(self, fonte: str, link: str, localizacao: dict) -> None:
+        """Preenche a localização (`lat`/`lon`/`preciso`/`texto`) de um anúncio já guardado.
+
+        Usado tanto pelos scrapers (assim que um anúncio novo é coletado)
+        quanto pela verificação periódica de disponibilidade, que aproveita a
+        própria visita à página para preencher a localização de anúncios
+        coletados antes dessa funcionalidade existir (ou cuja geocodificação
+        havia falhado antes). Não faz nada se o link não existir na fonte.
+        """
+        resultados = self.carregar_resultados(fonte)
+        for item in resultados:
+            if item.get("link") == link:
+                item["localizacao"] = localizacao
+                self.guardar_resultados(fonte, resultados)
+                return
+
+    # ---- Cache de geocodificação (partilhado entre fontes) --------------------
+
+    def carregar_cache_geocodificacao(self) -> dict:
+        dados = self._read_json(self.geocode_cache_path, {})
+        return dados if isinstance(dados, dict) else {}
+
+    def guardar_cache_geocodificacao(self, cache: dict) -> None:
+        self._write_json(self.geocode_cache_path, cache)
 
     # ---- Configuração da URL de busca, por fonte -----------------------------
 

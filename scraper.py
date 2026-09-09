@@ -6,6 +6,7 @@ from datetime import date
 from typing import Callable
 from playwright.async_api import async_playwright
 
+import geolocalizacao
 from classificacao import (
     analisar_fiador,
     extrair_bloco_do_anuncio,
@@ -15,6 +16,17 @@ from classificacao import (
 from storage import URL_BASE_DEFAULT, Storage, default_storage
 
 FONTE = "idealista"
+
+# Prefixos típicos de nomes de rua em Portugal. O idealista lista a
+# localização do nível mais específico ao mais genérico (rua, bairro, zona,
+# cidade); o primeiro item só é uma rua de verdade quando o anunciante
+# revelou o endereço exato — quando não revela, o primeiro item já é o
+# bairro. Ver `extrair_localizacao_pagina`.
+_PREFIXOS_RUA = (
+    "rua", "avenida", "av.", "praça", "praceta", "travessa", "largo",
+    "alameda", "beco", "rotunda", "estrada", "calçada", "urbanização",
+    "urbanizacao", "quinta", "impasse", "viela",
+)
 
 TEMPO_ENTRE_PAGINAS = 3.0
 TEMPO_ENTRE_ANUNCIOS = 2.5
@@ -205,6 +217,50 @@ async def extrair_tipo_anunciante_pagina(page) -> str | None:
     return None
 
 
+def parece_endereco_de_rua(texto: str) -> bool:
+    """Indica se `texto` parece um endereço de rua (vs. um nome de bairro/zona).
+
+    Usado para decidir entre marcador (endereço preciso) e círculo (só a
+    região) no mapa: um falso positivo faria um bairro parecer um endereço
+    exato, e um falso negativo faria uma rua de verdade virar uma área
+    aproximada maior do que precisa — nenhum dos dois é grave, só reduz um
+    pouco a precisão visual do mapa.
+    """
+    texto_normalizado = (texto or "").strip().lower()
+    return texto_normalizado.startswith(_PREFIXOS_RUA)
+
+
+async def extrair_localizacao_pagina(page, store: Storage) -> dict | None:
+    """Lê a hierarquia de localização do idealista e geocodifica o nível mais específico.
+
+    O idealista nunca expõe a coordenada exata no HTML inicial (o
+    `mapConfig.latitude`/`longitude` embutido na página vem sempre vazio) —
+    só a lista textual em `#headerMap` (rua, bairro, zona, cidade, do mais
+    específico ao mais genérico). Geocodificamos nós mesmos via Nominatim
+    (`geolocalizacao.geocodificar_com_cache`). Devolve `None` quando não há
+    lista de localização na página ou a geocodificação não encontra nada.
+    """
+    try:
+        elementos = await page.query_selector_all("#headerMap .header-map-list")
+        itens = [((await el.inner_text()) or "").strip() for el in elementos]
+        itens = [texto for texto in itens if texto]
+    except Exception:
+        itens = []
+
+    if not itens:
+        return None
+
+    texto = itens[0]
+    cidade = itens[-1] if len(itens) > 1 else ""
+    endereco_busca = f"{texto}, {cidade}, Portugal" if cidade else f"{texto}, Portugal"
+
+    coords = await asyncio.to_thread(geolocalizacao.geocodificar_com_cache, endereco_busca, store)
+    if not coords:
+        return None
+
+    return {"lat": coords[0], "lon": coords[1], "preciso": parece_endereco_de_rua(texto), "texto": texto}
+
+
 async def extrair_proxima_pagina(page):
     seletores = [
         "a[rel='next']",
@@ -339,6 +395,7 @@ async def raspar_idealista_porto(
                     "descricao": descricao_completa,
                     "passou_filtro": passou_filtro,
                     "data_atualizacao": data_atualizacao,
+                    "localizacao": await extrair_localizacao_pagina(detalhe_page, store),
                 }
                 anuncios_filtrados.append(item)
                 # Guarda no disco assim que este anúncio é classificado, em vez

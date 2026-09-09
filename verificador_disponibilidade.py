@@ -7,9 +7,13 @@ anúncios já guardados e remove definitivamente (via `Storage.remover_resultado
 os que já não estão disponíveis. O histórico de links visitados não é
 alterado, então o scraper continua sem revisitar esse anúncio no futuro.
 
-Ao contrário dos scrapers, não há extração de dados específica por site aqui:
-só é preciso abrir a página e checar se ela indica que o anúncio acabou. Por
-isso um único módulo serve todas as fontes, ao invés de um por site.
+A verificação em si (checar se a página indica que o anúncio acabou) é
+genérica entre fontes. Só uma coisa é específica por site: aproveitando que
+a página já está aberta mesmo, também preenchemos a localização (`lat`/`lon`
+pro mapa) de anúncios que ainda não têm — coletados antes dessa
+funcionalidade existir, ou cuja geocodificação falhou da primeira vez —
+reaproveitando as mesmas funções `extrair_localizacao_pagina` de cada
+scraper (ver `_EXTRATORES_LOCALIZACAO`).
 """
 from __future__ import annotations
 
@@ -19,10 +23,17 @@ from typing import Callable
 
 from playwright.async_api import async_playwright
 
+import scraper
+import scraper_imovirtual
 from classificacao import detectar_anuncio_indisponivel
 from storage import Storage, default_storage
 
 TEMPO_ENTRE_VERIFICACOES = 2.0
+
+_EXTRATORES_LOCALIZACAO = {
+    "idealista": scraper.extrair_localizacao_pagina,
+    "imovirtual": scraper_imovirtual.extrair_localizacao_pagina,
+}
 
 
 async def _anuncio_ainda_disponivel(page, url: str, store: Storage) -> bool:
@@ -101,6 +112,16 @@ async def verificar_disponibilidade(
                 store.log_mensagem(f"  -> Removido da lista (arrendado ou fora do ar): {link}")
                 store.remover_resultado(fonte, link)
                 removidos.append(item)
+            elif not item.get("localizacao"):
+                extrator = _EXTRATORES_LOCALIZACAO.get(fonte)
+                if extrator:
+                    try:
+                        localizacao = await extrator(page, store)
+                    except Exception as e:
+                        store.log_mensagem(f"  -> Erro ao geolocalizar {link}: {e}")
+                        localizacao = None
+                    if localizacao:
+                        store.atualizar_localizacao(fonte, link, localizacao)
 
             if progress_callback:
                 progress_callback(i, len(a_verificar))

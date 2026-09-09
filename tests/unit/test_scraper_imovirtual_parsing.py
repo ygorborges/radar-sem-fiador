@@ -126,3 +126,54 @@ class TestExtrairDoJsonLd:
     def test_sem_titulo_ou_descricao_nao_e_aceito(self):
         node = self._no_produto(description="")
         assert si._extrair_do_json_ld(self._documento(node)) is None
+
+
+class TestExtrairLocalizacaoDoJsonLd:
+    def _no_produto(self, **overrides):
+        base = {
+            "@type": ["Product", "Apartment"],
+            "address": {
+                "@type": "PostalAddress",
+                "addressCountry": "Portugal",
+                "addressRegion": "Porto",
+                "addressLocality": "Aldoar, Foz do Douro e Nevogilde",
+                "streetAddress": "Travessa Passos",
+            },
+            "geo": {"@type": "GeoCoordinates", "latitude": 41.16235, "longitude": -8.671025},
+        }
+        base.update(overrides)
+        return base
+
+    def _documento(self, node):
+        return {"@context": "https://schema.org", "@graph": [{"@type": "WebPage"}, node]}
+
+    def test_endereco_com_rua_e_preciso(self):
+        resultado = si._extrair_localizacao_do_json_ld(self._documento(self._no_produto()))
+        assert resultado == {
+            "lat": 41.16235,
+            "lon": -8.671025,
+            "preciso": True,
+            "texto": "Travessa Passos",
+        }
+
+    def test_sem_rua_usa_bairro_e_marca_como_impreciso(self):
+        node = self._no_produto(address={
+            "@type": "PostalAddress",
+            "addressCountry": "Portugal",
+            "addressRegion": "Porto",
+            "addressLocality": "Aldoar, Foz do Douro e Nevogilde",
+        })
+        resultado = si._extrair_localizacao_do_json_ld(self._documento(node))
+        assert resultado["preciso"] is False
+        assert resultado["texto"] == "Aldoar, Foz do Douro e Nevogilde"
+
+    def test_sem_geo_retorna_none(self):
+        node = self._no_produto(geo={})
+        assert si._extrair_localizacao_do_json_ld(self._documento(node)) is None
+
+    def test_sem_address_retorna_none(self):
+        node = self._no_produto(address={})
+        assert si._extrair_localizacao_do_json_ld(self._documento(node)) is None
+
+    def test_sem_graph_retorna_none(self):
+        assert si._extrair_localizacao_do_json_ld({"@context": "https://schema.org"}) is None

@@ -18,9 +18,12 @@ const els = {
   toast: document.getElementById('toast'),
   toggleConfigBtn: document.getElementById('toggleConfigBtn'),
   toggleFiltersBtn: document.getElementById('toggleFiltersBtn'),
+  toggleMapBtn: document.getElementById('toggleMapBtn'),
+  mapView: document.getElementById('mapView'),
+  mapNote: document.getElementById('mapNote'),
 };
 
-function initCollapsible(wrapperId, btn, storageKey, defaultExpanded) {
+function initCollapsible(wrapperId, btn, storageKey, defaultExpanded, aoExpandir) {
   const wrapper = document.getElementById(wrapperId);
   let expanded = defaultExpanded;
   try {
@@ -34,6 +37,9 @@ function initCollapsible(wrapperId, btn, storageKey, defaultExpanded) {
     wrapper.classList.toggle('expanded', expanded);
     btn.classList.toggle('active', expanded);
     btn.setAttribute('aria-expanded', String(expanded));
+    // O conteúdo só tem tamanho real depois da transição do collapsible
+    // terminar — importante pro Leaflet, que mede o container ao iniciar.
+    if (expanded && aoExpandir) setTimeout(aoExpandir, 300);
   };
   aplicar();
 
@@ -46,6 +52,67 @@ function initCollapsible(wrapperId, btn, storageKey, defaultExpanded) {
       // Sem persistência disponível: a preferência só vale para esta sessão.
     }
   });
+}
+
+// ---- Mapa -------------------------------------------------------------
+
+const PORTO_CENTRO = [41.1579, -8.6291];
+const RAIO_APROXIMADO_METROS = 450;
+
+let leafletMap = null;
+let leafletMarcadores = null;
+let ultimoFiltrado = [];
+
+function initMapaSeNecessario() {
+  if (leafletMap) {
+    leafletMap.invalidateSize();
+    return;
+  }
+  leafletMap = L.map(els.mapView).setView(PORTO_CENTRO, 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(leafletMap);
+  leafletMarcadores = L.layerGroup().addTo(leafletMap);
+  atualizarMarcadoresDoMapa(ultimoFiltrado);
+}
+
+function popupDoAnuncio(item) {
+  const avisoAproximado = item.localizacao.preciso ? '' : ' <em>(localização aproximada)</em>';
+  return `
+    <strong>${item.titulo}</strong><br>
+    ${item.preco}${avisoAproximado}<br>
+    <a href="${item.link}" target="_blank" rel="noreferrer">Abrir anúncio ↗</a>
+  `;
+}
+
+function atualizarMarcadoresDoMapa(itens) {
+  if (!leafletMap) return;
+  leafletMarcadores.clearLayers();
+
+  const localizados = itens.filter(item => {
+    const loc = item.localizacao;
+    return loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lon);
+  });
+
+  localizados.forEach(item => {
+    const { lat, lon, preciso } = item.localizacao;
+    const camada = preciso
+      ? L.marker([lat, lon])
+      : L.circle([lat, lon], {
+          radius: RAIO_APROXIMADO_METROS,
+          color: '#4f46e5',
+          fillColor: '#4f46e5',
+          fillOpacity: 0.18,
+          weight: 1.5,
+        });
+    camada.bindPopup(popupDoAnuncio(item));
+    leafletMarcadores.addLayer(camada);
+  });
+
+  els.mapNote.textContent = itens.length
+    ? `Mostrando ${localizados.length} de ${itens.length} anúncio(s) filtrado(s) no mapa — os demais não têm localização identificada.`
+    : 'Nenhum anúncio para este filtro.';
 }
 
 let toastTimer = null;
@@ -195,6 +262,9 @@ function render() {
   const totalOcultos = cachedData.filter(item => item.oculto).length;
   els.favoritosCount.textContent = totalFavoritos ? `(${totalFavoritos})` : '';
   els.ocultosCount.textContent = totalOcultos ? `(${totalOcultos})` : '';
+
+  ultimoFiltrado = filtered;
+  if (leafletMap) atualizarMarcadoresDoMapa(filtered);
 
   if (!filtered.length) {
     const mensagemVazio = els.verOcultos.checked
@@ -548,6 +618,7 @@ els.refreshBtn.addEventListener('click', fetchResults);
 
 initCollapsible('configCollapsible', els.toggleConfigBtn, 'radar_config_expanded', false);
 initCollapsible('filtersCollapsible', els.toggleFiltersBtn, 'radar_filters_expanded', false);
+initCollapsible('mapCollapsible', els.toggleMapBtn, 'radar_map_expanded', false, initMapaSeNecessario);
 
 (async () => {
   await fetchConfig();
