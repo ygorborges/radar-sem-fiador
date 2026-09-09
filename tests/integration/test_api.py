@@ -4,7 +4,7 @@ import threading
 import pytest
 
 from app import create_app
-from scrape_runner import ScrapeJobManager
+from scrape_runner import ScrapeJobManager, VerificacaoJobManager
 from storage import URL_BASE_DEFAULT_IDEALISTA, URL_BASE_DEFAULT_IMOVIRTUAL, Storage
 
 
@@ -22,8 +22,16 @@ def job_managers(store):
 
 
 @pytest.fixture
-def client(store, job_managers):
-    app = create_app(job_managers=job_managers, store=store)
+def check_managers(store):
+    return {
+        "idealista": VerificacaoJobManager("idealista", run_coroutine=None, store=store),
+        "imovirtual": VerificacaoJobManager("imovirtual", run_coroutine=None, store=store),
+    }
+
+
+@pytest.fixture
+def client(store, job_managers, check_managers):
+    app = create_app(job_managers=job_managers, check_managers=check_managers, store=store)
     app.testing = True
     return app.test_client()
 
@@ -52,6 +60,14 @@ def test_get_results_combina_todas_as_fontes_com_a_flag_favorito(client, store):
     assert por_link["https://a.pt/1"]["favorito"] is True
     assert por_link["https://b.pt/1"]["fonte"] == "imovirtual"
     assert por_link["https://b.pt/1"]["favorito"] is False
+
+
+def test_get_results_marca_a_flag_oculto(client, store):
+    store.guardar_resultados("idealista", [{"titulo": "Anúncio A", "link": "https://a.pt/1"}])
+    store.alternar_oculto("https://a.pt/1")
+
+    resultados = client.get("/api/results").get_json()
+    assert resultados[0]["oculto"] is True
 
 
 def test_get_config_retorna_todas_as_fontes(client):
@@ -125,6 +141,31 @@ def test_toggle_favorito_sem_link_retorna_erro(client):
     assert response.status_code == 400
 
 
+def test_toggle_oculto_reflete_em_get_results(client, store):
+    store.guardar_resultados("idealista", [{"titulo": "Anúncio A", "link": "https://a.pt/1"}])
+
+    response = client.post("/api/hidden/toggle", json={"link": "https://a.pt/1"})
+    assert response.status_code == 200
+    assert response.get_json() == {"link": "https://a.pt/1", "oculto": True}
+
+    resultados = client.get("/api/results").get_json()
+    assert resultados[0]["oculto"] is True
+
+    response = client.post("/api/hidden/toggle", json={"link": "https://a.pt/1"})
+    assert response.get_json()["oculto"] is False
+
+
+def test_toggle_oculto_sem_link_retorna_erro(client):
+    response = client.post("/api/hidden/toggle", json={})
+    assert response.status_code == 400
+
+
+def test_list_hidden_retorna_links_ocultos(client, store):
+    store.alternar_oculto("https://a.pt/1")
+    store.alternar_oculto("https://a.pt/2")
+    assert client.get("/api/hidden").get_json() == ["https://a.pt/1", "https://a.pt/2"]
+
+
 def test_scrape_status_inicial_e_idle_para_todas_as_fontes(client):
     status = client.get("/api/scrape/status").get_json()
     assert status["idealista"]["state"] == "idle"
@@ -185,6 +226,66 @@ def test_post_scrape_enquanto_em_execucao_retorna_409(store):
 
     liberar.set()
     job_managers["idealista"]._thread.join(timeout=5)
+
+
+def test_check_status_inicial_e_idle_para_todas_as_fontes(client):
+    status = client.get("/api/check/status").get_json()
+    assert status["idealista"]["state"] == "idle"
+    assert status["imovirtual"]["state"] == "idle"
+
+
+def test_post_check_fonte_desconhecida_retorna_404(client):
+    response = client.post("/api/check/olx")
+    assert response.status_code == 404
+
+
+def test_post_check_dispara_job_e_conclui(store):
+    async def fake_check(fonte, store=None, progress_callback=None):
+        return [{"titulo": "Anúncio", "link": "https://a.pt/1"}]
+
+    check_managers = {
+        "idealista": VerificacaoJobManager("idealista", fake_check, store=store),
+        "imovirtual": VerificacaoJobManager("imovirtual", run_coroutine=None, store=store),
+    }
+    app = create_app(check_managers=check_managers, store=store)
+    app.testing = True
+    client = app.test_client()
+
+    response = client.post("/api/check/idealista")
+    assert response.status_code == 202
+    assert response.get_json()["state"] == "running"
+
+    check_managers["idealista"]._thread.join(timeout=5)
+
+    status = client.get("/api/check/status").get_json()
+    assert status["idealista"]["state"] == "done"
+    assert status["idealista"]["total_removidos"] == 1
+    assert status["imovirtual"]["state"] == "idle"
+
+
+def test_post_check_enquanto_em_execucao_retorna_409(store):
+    liberar = threading.Event()
+
+    async def fake_check_bloqueante(fonte, store=None, progress_callback=None):
+        liberar.wait(timeout=5)
+        return []
+
+    check_managers = {
+        "idealista": VerificacaoJobManager("idealista", fake_check_bloqueante, store=store),
+        "imovirtual": VerificacaoJobManager("imovirtual", run_coroutine=None, store=store),
+    }
+    app = create_app(check_managers=check_managers, store=store)
+    app.testing = True
+    client = app.test_client()
+
+    primeira = client.post("/api/check/idealista")
+    assert primeira.status_code == 202
+
+    segunda = client.post("/api/check/idealista")
+    assert segunda.status_code == 409
+
+    liberar.set()
+    check_managers["idealista"]._thread.join(timeout=5)
 
 
 def test_scrape_de_fontes_diferentes_nao_bloqueia_uma_a_outra(store):

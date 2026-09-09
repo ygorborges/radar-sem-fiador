@@ -98,6 +98,29 @@ body {
 .scrape-status.running { color: var(--blue); }
 .scrape-status.done { color: var(--green-text); }
 .scrape-status.error { color: #b91c1c; }
+.check-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.check-status {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: bold;
+}
+.check-status.idle { color: var(--muted); }
+.check-status.running { color: var(--blue); }
+.check-status.done { color: var(--green-text); }
+.check-status.error { color: #b91c1c; }
+.check-hint {
+  margin: 6px 0 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
 .progress-bar {
   margin-top: 8px;
   height: 8px;
@@ -158,12 +181,16 @@ button:disabled {
   gap: 6px;
   white-space: nowrap;
 }
-.favoritos-only {
+.favoritos-only, .ocultos-only {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   color: var(--gray-text);
   font-size: 14px;
+}
+.count-badge {
+  color: var(--muted);
+  font-weight: bold;
 }
 .summary {
   margin-bottom: 16px;
@@ -180,6 +207,7 @@ button:disabled {
   border-radius: 12px;
   padding: 18px 20px;
   box-shadow: 0 2px 8px rgba(0,0,0,.03);
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
 .card.is-favorito {
   border-color: var(--amber);
@@ -190,6 +218,11 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+.card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .badges {
   display: flex;
@@ -229,6 +262,16 @@ button:disabled {
   background: var(--amber);
   color: #7c2d12;
 }
+.hide-btn {
+  background: var(--gray);
+  color: var(--gray-text);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.hide-btn.active {
+  background: var(--gray-text);
+  color: white;
+}
 .titulo {
   margin: 0 0 8px 0;
   font-size: 22px;
@@ -264,3 +307,39 @@ a {
   text-decoration: none;
 }
 a:hover { text-decoration: underline; }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translate(-50%, 16px);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--text);
+  color: white;
+  padding: 12px 18px;
+  border-radius: 10px;
+  font-size: 14px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.2);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease, transform .2s ease;
+  z-index: 100;
+}
+.toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+.toast-action {
+  background: transparent;
+  color: white;
+  border: 1px solid rgba(255,255,255,.4);
+  padding: 6px 12px;
+  font-weight: bold;
+  white-space: nowrap;
+}
+.toast-action:hover {
+  background: rgba(255,255,255,.15);
+}

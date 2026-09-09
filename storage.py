@@ -65,6 +65,7 @@ class Storage:
         self.historico_path = self.data_dir / "historico_anuncios.json"
         self.config_path = self.data_dir / "config.json"
         self.favoritos_path = self.data_dir / "favoritos.json"
+        self.ocultos_path = self.data_dir / "ocultos.json"
         self.log_path = self.data_dir / "scraper_log.txt"
         self._lock = threading.Lock()
 
@@ -147,6 +148,35 @@ class Storage:
         self.guardar_resultados(fonte, existentes)
         return existentes
 
+    def remover_resultado(self, fonte: str, link: str) -> bool:
+        """Remove definitivamente um anúncio que saiu do ar (arrendado/removido).
+
+        Usado pela verificação periódica (`verificador_disponibilidade.py`).
+        O histórico de links já visitados (`historico_anuncios.json`) não é
+        afetado — continua garantindo que o scraper nunca revisite esse link
+        — então não há necessidade de guardar mais nada sobre o anúncio.
+        Também limpa favoritos/ocultos associados a ele, para essas listas
+        não acumularem referências a anúncios que não existem mais. Devolve
+        `False` sem fazer nada se o link não existir nos resultados da fonte.
+        """
+        resultados = self.carregar_resultados(fonte)
+        restantes = [item for item in resultados if item.get("link") != link]
+        if len(restantes) == len(resultados):
+            return False
+        self.guardar_resultados(fonte, restantes)
+
+        favoritos = self.carregar_favoritos()
+        if link in favoritos:
+            favoritos.discard(link)
+            self.guardar_favoritos(favoritos)
+
+        ocultos = self.carregar_ocultos()
+        if link in ocultos:
+            ocultos.discard(link)
+            self.guardar_ocultos(ocultos)
+
+        return True
+
     # ---- Configuração da URL de busca, por fonte -----------------------------
 
     def _ler_config_bruta(self) -> dict:
@@ -207,6 +237,29 @@ class Storage:
             is_favorito = True
         self.guardar_favoritos(favoritos)
         return is_favorito
+
+    # ---- Ocultos (anúncios escondidos da listagem, partilhados entre fontes) --
+
+    def carregar_ocultos(self) -> set[str]:
+        dados = self._read_json(self.ocultos_path, [])
+        if isinstance(dados, list):
+            return {str(item) for item in dados}
+        return set()
+
+    def guardar_ocultos(self, ocultos: set[str]) -> None:
+        self._write_json(self.ocultos_path, sorted(ocultos))
+
+    def alternar_oculto(self, link: str) -> bool:
+        """Oculta/reexibe um anúncio na interface, sem apagar nada do backend."""
+        ocultos = self.carregar_ocultos()
+        if link in ocultos:
+            ocultos.discard(link)
+            is_oculto = False
+        else:
+            ocultos.add(link)
+            is_oculto = True
+        self.guardar_ocultos(ocultos)
+        return is_oculto
 
     # ---- Log ------------------------------------------------------------------
 

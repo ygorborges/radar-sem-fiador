@@ -79,6 +79,27 @@ class TestDetectarBloqueio:
         assert classificacao.detectar_bloqueio("") is False
 
 
+class TestDetectarAnuncioIndisponivel:
+    def test_detecta_anuncio_ja_nao_disponivel(self):
+        assert classificacao.detectar_anuncio_indisponivel("Este anúncio já não está disponível.") is True
+
+    def test_detecta_imovel_ja_nao_disponivel(self):
+        assert classificacao.detectar_anuncio_indisponivel("Este imóvel já não está disponível na plataforma.") is True
+
+    def test_detecta_anuncio_removido(self):
+        assert classificacao.detectar_anuncio_indisponivel("Este anúncio foi removido pelo anunciante.") is True
+
+    def test_detecta_pagina_nao_encontrada(self):
+        assert classificacao.detectar_anuncio_indisponivel("Erro 404 - Página não encontrada.") is True
+
+    def test_texto_normal_nao_e_indisponivel(self):
+        assert classificacao.detectar_anuncio_indisponivel("Apartamento T2 com boa localização, sem fiador.") is False
+
+    def test_texto_vazio_nao_e_indisponivel(self):
+        assert classificacao.detectar_anuncio_indisponivel("") is False
+        assert classificacao.detectar_anuncio_indisponivel(None) is False
+
+
 class TestAnalisarFiador:
     def test_texto_vazio(self):
         passou, status, trecho = classificacao.analisar_fiador("")

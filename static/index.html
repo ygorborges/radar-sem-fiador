@@ -50,7 +50,11 @@
         </span>
         <label class="favoritos-only">
           <input id="favoritosOnlyFilter" type="checkbox" />
-          Somente favoritos
+          Somente favoritos <span id="favoritosCount" class="count-badge"></span>
+        </label>
+        <label class="ocultos-only">
+          <input id="verOcultosFilter" type="checkbox" />
+          Ver ocultos <span id="ocultosCount" class="count-badge"></span>
         </label>
         <button id="refreshBtn" type="button">Atualizar</button>
       </div>
@@ -59,6 +63,8 @@
     <div id="summary" class="summary"></div>
     <div id="results" class="cards"></div>
   </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="/static/app.js"></script>
 </body>

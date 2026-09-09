@@ -9,15 +9,41 @@ const els = {
   precoMaxFilter: document.getElementById('precoMaxFilter'),
   sortOrder: document.getElementById('sortOrder'),
   favoritosOnly: document.getElementById('favoritosOnlyFilter'),
+  favoritosCount: document.getElementById('favoritosCount'),
+  verOcultos: document.getElementById('verOcultosFilter'),
+  ocultosCount: document.getElementById('ocultosCount'),
   summary: document.getElementById('summary'),
   results: document.getElementById('results'),
   refreshBtn: document.getElementById('refreshBtn'),
+  toast: document.getElementById('toast'),
 };
+
+let toastTimer = null;
+
+function esconderToast() {
+  clearTimeout(toastTimer);
+  els.toast.classList.remove('show');
+}
+
+function mostrarToast(mensagem, { textoAcao, aoAcionar } = {}) {
+  clearTimeout(toastTimer);
+  els.toast.innerHTML = `<span>${mensagem}</span>` + (textoAcao ? `<button type="button" class="toast-action">${textoAcao}</button>` : '');
+  if (textoAcao && aoAcionar) {
+    els.toast.querySelector('.toast-action').addEventListener('click', () => {
+      esconderToast();
+      aoAcionar();
+    });
+  }
+  els.toast.classList.add('show');
+  toastTimer = setTimeout(esconderToast, 5000);
+}
 
 let cachedData = [];
 let fonteLabels = {};
 let pollTimer = null;
+let pollCheckTimer = null;
 let ultimoEstadoPorFonte = {};
+let ultimoEstadoCheckPorFonte = {};
 
 function statusClass(item) {
   if (item.passou_filtro === false) return 'warning';
@@ -75,10 +101,14 @@ function applyFilters(data) {
   const tipologiaSelected = els.tipologiaFilter.value || 'todas';
   const anuncianteSelected = els.anuncianteFilter.value || 'todos';
   const favoritosOnly = els.favoritosOnly.checked;
+  const verOcultos = els.verOcultos.checked;
   const precoMin = els.precoMinFilter.value !== '' ? parseFloat(els.precoMinFilter.value) : null;
   const precoMax = els.precoMaxFilter.value !== '' ? parseFloat(els.precoMaxFilter.value) : null;
 
   return data.filter(item => {
+    // Por padrão, anúncios ocultos ficam fora da listagem; "Ver ocultos" inverte
+    // para mostrar só esses, permitindo revisá-los (e desocultá-los se quiser).
+    if (verOcultos ? !item.oculto : item.oculto) return false;
     if (termoBusca) {
       const textoPesquisavel = `${item.titulo} ${item.descricao} ${item.trecho_status || ''}`.toLowerCase();
       if (!textoPesquisavel.includes(termoBusca)) return false;
@@ -131,8 +161,16 @@ function render() {
     ? `${filtered.length} anúncio(s) encontrado(s) (${comFalha} com aviso de falha na análise)`
     : `${filtered.length} anúncio(s) encontrado(s)`;
 
+  const totalFavoritos = cachedData.filter(item => item.favorito).length;
+  const totalOcultos = cachedData.filter(item => item.oculto).length;
+  els.favoritosCount.textContent = totalFavoritos ? `(${totalFavoritos})` : '';
+  els.ocultosCount.textContent = totalOcultos ? `(${totalOcultos})` : '';
+
   if (!filtered.length) {
-    els.results.innerHTML = '<div class="empty">Nenhum anúncio para este filtro.</div>';
+    const mensagemVazio = els.verOcultos.checked
+      ? 'Nenhum anúncio oculto no momento.'
+      : 'Nenhum anúncio para este filtro.';
+    els.results.innerHTML = `<div class="empty">${mensagemVazio}</div>`;
     return;
   }
 
@@ -143,9 +181,14 @@ function render() {
           <div class="badge ${statusClass(item)}">${item.status}</div>
           <div class="badge fonte">${rotuloFonte(item.fonte)}</div>
         </div>
-        <button class="fav-btn ${item.favorito ? 'active' : ''}" data-link="${item.link}" type="button" aria-pressed="${item.favorito}">
-          ${item.favorito ? '★ Favorito' : '☆ Favoritar'}
-        </button>
+        <div class="card-actions">
+          <button class="fav-btn ${item.favorito ? 'active' : ''}" data-link="${item.link}" type="button" aria-pressed="${item.favorito}" title="${item.favorito ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}">
+            ${item.favorito ? '★ Favorito' : '☆ Favoritar'}
+          </button>
+          <button class="hide-btn ${item.oculto ? 'active' : ''}" data-link="${item.link}" type="button" aria-pressed="${item.oculto}" title="${item.oculto ? 'Voltar a mostrar este anúncio na lista' : 'Tirar este anúncio da lista sem apagá-lo'}">
+            ${item.oculto ? '🔁 Mostrar' : '🙈 Ocultar'}
+          </button>
+        </div>
       </div>
       ${item.passou_filtro === false ? `
         <div class="warning-banner">
@@ -166,6 +209,9 @@ function render() {
   els.results.querySelectorAll('.fav-btn').forEach(btn => {
     btn.addEventListener('click', () => toggleFavorite(btn.dataset.link));
   });
+  els.results.querySelectorAll('.hide-btn').forEach(btn => {
+    btn.addEventListener('click', () => toggleHidden(btn.dataset.link));
+  });
   els.results.querySelectorAll('.descricao').forEach(el => {
     el.addEventListener('click', () => el.classList.toggle('expanded'));
   });
@@ -183,6 +229,28 @@ async function toggleFavorite(link) {
     const item = cachedData.find(i => i.link === link);
     if (item) item.favorito = data.favorito;
     render();
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function toggleHidden(link) {
+  try {
+    const response = await fetch('/api/hidden/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ link }),
+    });
+    if (!response.ok) throw new Error('Não foi possível ocultar/reexibir o anúncio.');
+    const data = await response.json();
+    const item = cachedData.find(i => i.link === link);
+    if (item) item.oculto = data.oculto;
+    render();
+    // Ocultar não apaga nada no backend, mas ainda assim é fácil de fazer
+    // sem querer — o "Desfazer" evita ter de ligar "Ver ocultos" só para reverter.
+    if (data.oculto) {
+      mostrarToast('Anúncio ocultado.', { textoAcao: 'Desfazer', aoAcionar: () => toggleHidden(link) });
+    }
   } catch (error) {
     console.error(error);
   }
@@ -226,6 +294,14 @@ function painelFonteHTML(fonte, dados) {
       <div class="config-msg"></div>
       <div class="scrape-status idle"></div>
       <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden>
+        <div class="progress-bar-fill"></div>
+      </div>
+      <div class="check-actions">
+        <button type="button" class="secondary run-check-btn">Verificar anúncios ativos</button>
+      </div>
+      <p class="check-hint">Remove definitivamente da lista os anúncios que já saíram do ar (arrendados ou removidos pelo anunciante).</p>
+      <div class="check-status idle"></div>
+      <div class="progress-bar check-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden>
         <div class="progress-bar-fill"></div>
       </div>
     </section>
@@ -338,6 +414,69 @@ async function runScraper(fonte, painel) {
   pollScrapeStatus();
 }
 
+function atualizarPainelDeCheckStatus(fonte, status) {
+  const painel = els.fontesContainer.querySelector(`[data-fonte="${fonte}"]`);
+  if (!painel) return;
+
+  const labels = {
+    idle: 'Nenhuma verificação de disponibilidade realizada ainda.',
+    running: status.mensagem || 'Verificando anúncios ativos...',
+    done: status.mensagem || 'Verificação concluída.',
+    error: status.mensagem || 'Ocorreu um erro durante a verificação.',
+  };
+  let texto = labels[status.state] || '';
+  const emProgresso = status.state === 'running' && status.total;
+  if (emProgresso) {
+    const eta = formatarEta(status.eta_segundos);
+    if (eta) texto += ` (${eta})`;
+  }
+
+  const statusEl = painel.querySelector('.check-status');
+  statusEl.textContent = texto;
+  statusEl.className = `check-status ${status.state}`;
+  painel.querySelector('.run-check-btn').disabled = status.state === 'running';
+
+  const barraEl = painel.querySelector('.check-progress-bar');
+  barraEl.hidden = !emProgresso;
+  if (emProgresso) {
+    const pct = Math.min(100, Math.round((status.atual / status.total) * 100));
+    barraEl.querySelector('.progress-bar-fill').style.width = `${pct}%`;
+    barraEl.setAttribute('aria-valuenow', String(pct));
+  }
+}
+
+async function pollCheckStatus() {
+  const response = await fetch('/api/check/status');
+  const statusPorFonte = await response.json();
+
+  let algumaEmExecucao = false;
+  let algumaAcabouDeConcluir = false;
+
+  for (const [fonte, status] of Object.entries(statusPorFonte)) {
+    atualizarPainelDeCheckStatus(fonte, status);
+    if (status.state === 'running') algumaEmExecucao = true;
+    if (status.state === 'done' && ultimoEstadoCheckPorFonte[fonte] === 'running') algumaAcabouDeConcluir = true;
+    ultimoEstadoCheckPorFonte[fonte] = status.state;
+  }
+
+  // Anúncios podem ter sido removidos definitivamente nesta verificação.
+  if (algumaAcabouDeConcluir) fetchResults();
+
+  clearTimeout(pollCheckTimer);
+  if (algumaEmExecucao) {
+    pollCheckTimer = setTimeout(pollCheckStatus, 3000);
+  }
+}
+
+async function runCheck(fonte) {
+  const response = await fetch(`/api/check/${fonte}`, { method: 'POST' });
+  const status = await response.json();
+  atualizarPainelDeCheckStatus(fonte, status);
+  if (response.status === 409) return;
+  ultimoEstadoCheckPorFonte[fonte] = 'running';
+  pollCheckStatus();
+}
+
 els.fontesContainer.addEventListener('click', event => {
   const painel = event.target.closest('[data-fonte]');
   if (!painel) return;
@@ -346,6 +485,7 @@ els.fontesContainer.addEventListener('click', event => {
   if (event.target.classList.contains('save-url-btn')) saveUrl(fonte, painel);
   else if (event.target.classList.contains('reset-url-btn')) resetUrl(fonte, painel);
   else if (event.target.classList.contains('run-scraper-btn')) runScraper(fonte, painel);
+  else if (event.target.classList.contains('run-check-btn')) runCheck(fonte);
 });
 
 els.searchInput.addEventListener('input', render);
@@ -357,10 +497,12 @@ els.precoMinFilter.addEventListener('input', render);
 els.precoMaxFilter.addEventListener('input', render);
 els.sortOrder.addEventListener('change', render);
 els.favoritosOnly.addEventListener('change', render);
+els.verOcultos.addEventListener('change', render);
 els.refreshBtn.addEventListener('click', fetchResults);
 
 (async () => {
   await fetchConfig();
   await fetchResults();
   pollScrapeStatus();
+  pollCheckStatus();
 })();

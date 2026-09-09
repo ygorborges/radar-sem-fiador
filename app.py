@@ -11,7 +11,7 @@ from typing import Optional
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from scrape_runner import ScrapeJobManager, default_job_managers
+from scrape_runner import ScrapeJobManager, VerificacaoJobManager, default_check_managers, default_job_managers
 from storage import FONTES, Storage, default_storage
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -20,11 +20,13 @@ STATIC_DIR = BASE_DIR / "static"
 
 def create_app(
     job_managers: Optional[dict[str, ScrapeJobManager]] = None,
+    check_managers: Optional[dict[str, VerificacaoJobManager]] = None,
     store: Optional[Storage] = None,
 ) -> Flask:
-    """Cria a aplicação Flask. Aceita `job_managers`/`store` para testes isolados."""
+    """Cria a aplicação Flask. Aceita `job_managers`/`check_managers`/`store` para testes isolados."""
     app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
     app.config["JOB_MANAGERS"] = job_managers or default_job_managers
+    app.config["CHECK_MANAGERS"] = check_managers or default_check_managers
     app.config["STORE"] = store or default_storage
 
     @app.get("/")
@@ -36,8 +38,10 @@ def create_app(
         store = app.config["STORE"]
         resultados = store.carregar_resultados_todas_fontes()
         favoritos = store.carregar_favoritos()
+        ocultos = store.carregar_ocultos()
         for item in resultados:
             item["favorito"] = item.get("link") in favoritos
+            item["oculto"] = item.get("link") in ocultos
         return jsonify(resultados)
 
     @app.get("/api/config")
@@ -106,6 +110,36 @@ def create_app(
             return jsonify(status), 409
         config = store.carregar_config()
         status = job_manager.start(config[fonte]["url_atual"])
+        return jsonify(status), 202
+
+    @app.get("/api/hidden")
+    def list_hidden():
+        store = app.config["STORE"]
+        return jsonify(sorted(store.carregar_ocultos()))
+
+    @app.post("/api/hidden/toggle")
+    def toggle_hidden():
+        store = app.config["STORE"]
+        payload = request.get_json(silent=True) or {}
+        link = (payload.get("link") or "").strip()
+        if not link:
+            return jsonify({"erro": "Link não informado."}), 400
+        oculto = store.alternar_oculto(link)
+        return jsonify({"link": link, "oculto": oculto})
+
+    @app.get("/api/check/status")
+    def check_status():
+        return jsonify({fonte: manager.status() for fonte, manager in app.config["CHECK_MANAGERS"].items()})
+
+    @app.post("/api/check/<fonte>")
+    def start_check(fonte: str):
+        check_manager = app.config["CHECK_MANAGERS"].get(fonte)
+        if check_manager is None:
+            return jsonify({"erro": f"Fonte desconhecida: {fonte}"}), 404
+        status = check_manager.status()
+        if status["state"] == "running":
+            return jsonify(status), 409
+        status = check_manager.start()
         return jsonify(status), 202
 
     return app

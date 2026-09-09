@@ -198,6 +198,34 @@ def detectar_bloqueio(texto: str) -> bool:
     return any(padrao in texto_lower for padrao in padroes_bloqueio)
 
 
+def detectar_anuncio_indisponivel(texto: str) -> bool:
+    """Detecta se a página indica que o anúncio já não está disponível.
+
+    Cobre as mensagens típicas de "arrendado"/"removido pelo anunciante" do
+    idealista e do Imovirtual, além de páginas de erro genéricas para as
+    quais um anúncio removido costuma redirecionar. O texto exato varia
+    entre sites e pode mudar com o tempo, então os padrões abaixo exigem
+    frases razoavelmente específicas: um falso negativo só adia a marcação
+    para a próxima verificação, mas um falso positivo esconderia por engano
+    um anúncio que ainda está ativo.
+    """
+    if not texto or not texto.strip():
+        return False
+
+    texto_lower = " ".join(texto.split()).lower()
+    padroes_indisponivel = [
+        r"an[uú]ncio\s+j[áa]\s+n[ãa]o\s+est[áa]\s+dispon[íi]vel",
+        r"im[óo]vel\s+j[áa]\s+n[ãa]o\s+est[áa]\s+dispon[íi]vel",
+        r"an[uú]ncio\s+(?:foi\s+)?removido",
+        r"an[uú]ncio\s+(?:j[áa]\s+)?expirad[oa]",
+        r"an[uú]ncio\s+inativo",
+        r"oferta\s+j[áa]\s+n[ãa]o\s+(?:est[áa]|se\s+encontra)\s+dispon[íi]vel",
+        r"esta\s+p[áa]gina\s+n[ãa]o\s+existe",
+        r"p[áa]gina\s+n[ãa]o\s+encontrada",
+    ]
+    return any(re.search(padrao, texto_lower) for padrao in padroes_indisponivel)
+
+
 def analisar_fiador(texto: str) -> tuple[bool, str, str | None]:
     if not texto or not texto.strip():
         return False, "ERRO_TEXTO_VAZIO", None

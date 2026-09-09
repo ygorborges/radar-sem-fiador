@@ -87,6 +87,35 @@ class TestResultados:
         (store.data_dir / FONTES["idealista"]["resultados_filename"]).write_text("{ isto nao e json valido", encoding="utf-8")
         assert store.carregar_resultados("idealista") == []
 
+    def test_remover_resultado_apaga_o_anuncio_e_preserva_os_demais(self, store):
+        store.guardar_resultados("idealista", [
+            {"titulo": "Anúncio A", "link": "https://a.pt/1"},
+            {"titulo": "Anúncio B", "link": "https://a.pt/2"},
+        ])
+
+        removido = store.remover_resultado("idealista", "https://a.pt/1")
+
+        assert removido is True
+        assert store.carregar_resultados("idealista") == [{"titulo": "Anúncio B", "link": "https://a.pt/2"}]
+
+    def test_remover_resultado_tambem_limpa_favorito_e_oculto_associados(self, store):
+        link = "https://a.pt/1"
+        store.guardar_resultados("idealista", [{"titulo": "Anúncio", "link": link}])
+        store.alternar_favorito(link)
+        store.alternar_oculto(link)
+
+        store.remover_resultado("idealista", link)
+
+        assert store.carregar_favoritos() == set()
+        assert store.carregar_ocultos() == set()
+
+    def test_remover_resultado_com_link_inexistente_nao_faz_nada(self, store):
+        dados = [{"titulo": "Anúncio", "link": "https://a.pt/1"}]
+        store.guardar_resultados("idealista", dados)
+        removido = store.remover_resultado("idealista", "https://a.pt/nao-existe")
+        assert removido is False
+        assert store.carregar_resultados("idealista") == dados
+
 
 class TestConfig:
     def test_config_padrao_quando_nao_existe(self, store):
@@ -141,6 +170,31 @@ class TestFavoritos:
         store.alternar_favorito("https://a.pt/1")
         store.alternar_favorito("https://a.pt/2")
         assert store.carregar_favoritos() == {"https://a.pt/1", "https://a.pt/2"}
+
+
+class TestOcultos:
+    def test_sem_ocultos_inicialmente(self, store):
+        assert store.carregar_ocultos() == set()
+
+    def test_alternar_oculto_adiciona_e_remove(self, store):
+        link = "https://www.idealista.pt/imovel/123/"
+        assert store.alternar_oculto(link) is True
+        assert store.carregar_ocultos() == {link}
+
+        assert store.alternar_oculto(link) is False
+        assert store.carregar_ocultos() == set()
+
+    def test_ocultos_multiplos_independentes(self, store):
+        store.alternar_oculto("https://a.pt/1")
+        store.alternar_oculto("https://a.pt/2")
+        assert store.carregar_ocultos() == {"https://a.pt/1", "https://a.pt/2"}
+
+    def test_ocultar_nao_afeta_favoritos(self, store):
+        link = "https://a.pt/1"
+        store.alternar_favorito(link)
+        store.alternar_oculto(link)
+        assert store.carregar_favoritos() == {link}
+        assert store.carregar_ocultos() == {link}
 
 
 class TestLog:
