@@ -19,6 +19,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from playwright.async_api import async_playwright
 
+import divisoes_administrativas
 from classificacao import analisar_fiador, extrair_tipo_anunciante, extrair_tipologia
 from storage import URL_BASE_DEFAULT_IMOVIRTUAL, Storage, default_storage
 
@@ -141,9 +142,13 @@ def _extrair_do_json_ld(dados: dict) -> dict | None:
 def _extrair_localizacao_do_json_ld(dados: dict) -> dict | None:
     """Lê `address`/`geo` do nó do anúncio no JSON-LD, quando presentes.
 
-    `addressRegion` é o concelho e `addressLocality` a freguesia — ambos já
-    vêm como divisões administrativas oficiais nesse schema, ao contrário do
-    idealista (onde são deduzidos por posição numa lista de texto livre).
+    `addressLocality` é a freguesia — vem como divisão administrativa
+    oficial nesse schema, formatação à parte (ver `divisoes_administrativas`).
+    `addressRegion`, apesar do nome, **não é o concelho**: é o distrito (ex.:
+    "Porto", que cobre Porto, Gondomar, Maia, Matosinhos, Valongo, Vila Nova
+    de Gaia e mais uma dúzia de concelhos) — usá-lo diretamente como concelho
+    foi um bug real detectado depois (anúncios da Maia/Gondomar apareciam com
+    concelho "Porto"). O concelho correto é derivado da freguesia.
     """
     grafo = dados.get("@graph") if isinstance(dados, dict) else None
     if not isinstance(grafo, list):
@@ -167,8 +172,16 @@ def _extrair_localizacao_do_json_ld(dados: dict) -> dict | None:
         if not texto:
             continue
 
-        concelho = str(endereco.get("addressRegion") or "").strip() or None
-        freguesia = bairro or None
+        freguesia_bruta = bairro or None
+        # addressRegion (distrito) quase nunca desempata sozinho — os
+        # concelhos ambíguos costumam pertencer ao mesmo distrito uns dos
+        # outros — mas não custa nada oferecer como pista mesmo assim.
+        distrito = str(endereco.get("addressRegion") or "").strip() or None
+        concelho = (
+            divisoes_administrativas.concelho_da_freguesia(freguesia_bruta, dica_cidade=distrito)
+            if freguesia_bruta else None
+        )
+        freguesia = divisoes_administrativas.canonicalizar_freguesia(freguesia_bruta) if concelho else freguesia_bruta
 
         return {
             "lat": float(lat),

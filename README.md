@@ -29,13 +29,20 @@ scrape_runner.py          -> um ScrapeJobManager/VerificacaoJobManager por fonte
 classificacao.py          -> classificação de fiador e extração de tipologia/anunciante, comum a todas as fontes
 scraper.py                -> scraper do idealista.pt (navegação + extração específica do site)
 scraper_imovirtual.py     -> scraper do Imovirtual (navegação + extração específica do site)
-verificador_disponibilidade.py -> revisita anúncios já coletados: remove os que saíram do ar e preenche localização que falte
+verificador_disponibilidade.py -> revisita anúncios já coletados: remove os que saíram do ar e preenche localização/descrição que faltem
 geolocalizacao.py         -> geocodificação (Nominatim/OpenStreetMap) usada só pelo idealista, com cache em disco
+divisoes_administrativas.py -> concelho/freguesia oficiais de Portugal (concelhos_freguesias.json), fonte confiável pro concelho de cada anúncio
 storage.py                -> persistência em JSON (config e resultados por fonte; histórico, favoritos e ocultos partilhados)
 static/                   -> interface (index.html, app.js, styles.css)
 data/                     -> ficheiros gerados em runtime (não versionados)
 tests/                    -> testes unitários e de integração (pytest)
+
+reclassificar.py            -> reaplica a classificação de fiador aos anúncios já guardados (sem reabrir páginas)
+corrigir_concelhos.py       -> corrige concelho/freguesia dos anúncios já guardados via divisoes_administrativas
+corrigir_geocodificacao.py  -> re-geocodifica o idealista com busca estruturada (rua + cidade), usando o concelho já corrigido
 ```
+
+Os três scripts acima (`reclassificar.py`, `corrigir_concelhos.py`, `corrigir_geocodificacao.py`) existem porque a descrição completa e a localização de cada anúncio já ficam guardadas — sempre que a lógica de classificação/localização é corrigida, dá pra reaplicá-la sobre o que já está em `data/` sem depender de uma nova varredura. Rode-os com `python <script>.py`.
 
 Adicionar uma nova fonte (ex.: OLX) significa: uma entrada em `storage.FONTES`, um módulo `scraper_olx.py` reaproveitando `classificacao.py`, e uma entrada em `scrape_runner.criar_job_managers_padrao` — a API e a interface já são genéricas por fonte e não precisam de mudanças estruturais.
 
@@ -98,8 +105,10 @@ pytest
 - `tests/unit/test_scraper_playwright_helpers.py` — extratores assíncronos do idealista que dependem de uma `page` (com um dublê no lugar do Playwright real).
 - `tests/unit/test_scraper_imovirtual_parsing.py` — extração específica do Imovirtual: paginação (`page=N`, incluindo o caso em que o site "clampa" para a última página existente), data de atualização (formato `D.MM.AAAA`, já com ano), parsing do JSON-LD estruturado, e a normalização de links promovidos (`/hpr/...`) que apontam pro mesmo anúncio.
 - `tests/unit/test_storage.py` — persistência por fonte (resultados, config) e partilhada (histórico, favoritos, ocultos, cache de geocodificação), incluindo a migração automática do formato antigo de `config.json`.
-- `tests/unit/test_geolocalizacao.py` — geocodificação via Nominatim (sucesso, sem resultado, falha de rede) e o cache em disco, com a chamada HTTP sempre substituída por um dublê (nunca bate na rede de verdade).
+- `tests/unit/test_geolocalizacao.py` — geocodificação via Nominatim (busca livre e estruturada, sem resultado, falha de rede) e o cache em disco, com a chamada HTTP sempre substituída por um dublê (nunca bate na rede de verdade).
+- `tests/unit/test_divisoes_administrativas.py` — concelho a partir da freguesia (formatos diferentes entre fontes, paróquias antigas, nomes ambíguos entre concelhos, desempate por dica de cidade).
 - `tests/unit/test_verificador_disponibilidade.py` — decisão de disponibilidade a partir de status HTTP/texto da página.
+- `tests/unit/test_reclassificar.py`, `test_corrigir_concelhos.py`, `test_corrigir_geocodificacao.py` — os scripts de manutenção que reaplicam classificação/localização aos anúncios já guardados.
 - `tests/unit/test_scrape_runner.py` — orquestração da execução em segundo plano por fonte: sucesso, erro, progresso e ETA reportados durante a execução, bloqueio de execuções concorrentes da mesma fonte, e independência entre fontes diferentes.
 - `tests/integration/test_api.py` — todas as rotas da API Flask via test client, incluindo o fluxo completo por fonte.
 
@@ -111,9 +120,9 @@ pytest
 - Tudo que os scrapers fazem (páginas visitadas, classificação de cada anúncio, erros) é gravado em `data/scraper_log.txt`, além de aparecer no terminal — é o primeiro lugar a olhar se algo parecer errado numa execução.
 - A página de detalhe do Imovirtual só espera o carregamento inicial do HTML (`domcontentloaded`) em vez de esperar a rede ficar ociosa (`networkidle`): medido em execução real, ~18% das páginas nunca atingiam esse estado (anúncios/scripts mantêm requisições em segundo plano) e expiravam no timeout de 20s à toa — os dados usados (JSON-LD) já vêm prontos no HTML inicial.
 - A descrição completa de cada anúncio é guardada (não só um trecho), permitindo a busca por palavra-chave no conteúdo. Anúncios já visitados em execuções antigas (antes dessa mudança) mantêm a descrição truncada de 250 caracteres que foi salva na época, já que o histórico impede revisitá-los; só uma nova execução sobre eles (ex.: limpando `historico_anuncios.json`) atualizaria para o texto completo.
-- A geocodificação (idealista) usa a API pública da Nominatim, que limita a 1 pedido por segundo e exige um User-Agent identificável — ambos respeitados em `geolocalizacao.py`. O cache em `data/geocode_cache.json` evita repetir pedidos pro mesmo endereço/bairro entre execuções.
+- A geocodificação (idealista) usa a API pública da Nominatim, que limita a 1 pedido por segundo e exige um User-Agent identificável — ambos respeitados em `geolocalizacao.py`. O cache em `data/geocode_cache.json` evita repetir pedidos pro mesmo endereço/bairro entre execuções. Quando o concelho já foi confirmado, usa busca **estruturada** (`street`+`city` separados) — mas isso sozinho não bastou: nomes de rua/praça comuns em Portugal ("Praça da República" existe em dezenas de cidades) faziam a Nominatim devolver, às vezes em primeiro lugar, um resultado de *outra* cidade, porque o parâmetro `city` dela também compara com o distrito (que cobre várias cidades) e a ordenação por "importância" do OSM não é confiável pra esse fim. A correção: pedir vários candidatos e só aceitar um cujo `address.city`/`town`/`village`/`municipality` bate exatamente com a cidade pedida — sem isso, devolve `None` em vez de uma coordenada errada.
 - Anúncios coletados antes da funcionalidade de mapa (ou do filtro de concelho/freguesia) existir não têm esses campos até serem revisitados — rode **Verificar anúncios ativos** de cada fonte pra preencher/completar os que faltam (ela aproveita a própria visita de verificação de disponibilidade pra isso, sem precisar de uma varredura nova, e também completa quem já tinha `localizacao` num formato mais antigo).
-- Concelho/freguesia vêm de fontes com confiabilidade diferente: no Imovirtual são campos estruturados do schema.org (`addressRegion`/`addressLocality`), então são exatos; no idealista são deduzidos por posição numa lista de texto livre (penúltimo item = freguesia, último = concelho) — quando o idealista intercala uma "zona" informal antes da freguesia oficial (comum em cidades grandes), o filtro de freguesia pode ficar um nível "errado" para esses casos específicos.
+- **O concelho de cada anúncio nunca vem direto do site** — `addressRegion` do Imovirtual é o *distrito* (ex.: "Porto" cobre Porto, Gondomar, Maia, Matosinhos, Valongo, Gaia e mais uma dúzia de concelhos, não só o concelho "Porto"), e o último nível da lista de localização do idealista às vezes junta concelho e distrito numa única string capenga ("Vila Nova de Gaia, Porto"). O concelho é sempre derivado da freguesia (essa sim, relativamente confiável nos dois sites) através da divisão administrativa oficial (`divisoes_administrativas.py`, 306 concelhos / 3092 freguesias — pós-reorganização de 2013). Nomes de freguesia se repetem por Portugal mais do que se esperaria (ex.: "Paranhos" existe no Porto e em Seia; "Oliveira do Douro" existe em Gaia e em Cinfães) — nesses casos o concelho fica `None` (não filtrável) a menos que o texto bruto da fonte sirva de desempate; ~7% dos anúncios com localização caem nessa categoria.
 - Projeto pessoal para uso educacional — respeite os termos de uso de cada site e evite varreduras agressivas.
 
 ## Licença

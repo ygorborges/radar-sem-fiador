@@ -171,6 +171,34 @@ class TestExtrairLocalizacaoDoJsonLd:
         assert resultado["concelho"] == "Porto"
         assert resultado["freguesia"] == "Aldoar, Foz do Douro e Nevogilde"
 
+    def test_concelho_vem_da_freguesia_nao_do_addressregion(self):
+        # Regressão: addressRegion é o *distrito* ("Porto" cobre Porto,
+        # Gondomar, Maia, Matosinhos, Valongo e mais uma dúzia de concelhos),
+        # não o concelho. Um anúncio da Maia com addressRegion "Porto" tinha
+        # que resultar em concelho "Maia" (derivado da freguesia), não "Porto".
+        node = self._no_produto(address={
+            "@type": "PostalAddress",
+            "addressCountry": "Portugal",
+            "addressRegion": "Porto",
+            "addressLocality": "Cidade da Maia",
+            "streetAddress": "",
+        })
+        resultado = si._extrair_localizacao_do_json_ld(self._documento(node))
+        assert resultado["concelho"] == "Maia"
+        assert resultado["freguesia"] == "Cidade da Maia"
+
+    def test_freguesia_nao_reconhecida_deixa_concelho_none(self):
+        node = self._no_produto(address={
+            "@type": "PostalAddress",
+            "addressCountry": "Portugal",
+            "addressRegion": "Porto",
+            "addressLocality": "Bairro Que Não Existe Em Lugar Nenhum",
+            "streetAddress": "",
+        })
+        resultado = si._extrair_localizacao_do_json_ld(self._documento(node))
+        assert resultado["concelho"] is None
+        assert resultado["freguesia"] == "Bairro Que Não Existe Em Lugar Nenhum"
+
     def test_sem_geo_retorna_none(self):
         node = self._no_produto(geo={})
         assert si._extrair_localizacao_do_json_ld(self._documento(node)) is None

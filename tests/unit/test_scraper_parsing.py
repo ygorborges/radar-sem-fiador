@@ -54,6 +54,11 @@ class TestPareceEnderecoDeRua:
 
 class TestConcelhoEFreguesia:
     def test_hierarquia_completa_rua_bairro_freguesia_concelho(self):
+        # O concelho vem da freguesia (divisão administrativa oficial), não
+        # do último item da lista — daí "Porto" bater mesmo sem repetir o
+        # texto do último item. A freguesia também é canonicalizada pro
+        # nome oficial (com "e"/vírgulas), não fica com os travessões que o
+        # idealista usa.
         itens = [
             "Rua de Faria Guimarães, 60",
             "Camões - Faria Guimarães",
@@ -62,17 +67,30 @@ class TestConcelhoEFreguesia:
         ]
         concelho, freguesia = scraper._concelho_e_freguesia(itens)
         assert concelho == "Porto"
-        assert freguesia == "Cedofeita - Santo Ildefonso - Sé - Miragaia - São Nicolau - Vitória"
+        assert freguesia == "Cedofeita, Santo Ildefonso, Sé, Miragaia, São Nicolau e Vitória"
 
     def test_hierarquia_curta_de_dois_niveis(self):
+        # "Aldoar" sozinho (paróquia antiga) resolve pro concelho certo e
+        # canonicaliza pra união completa.
         concelho, freguesia = scraper._concelho_e_freguesia(["Aldoar", "Porto"])
         assert concelho == "Porto"
-        assert freguesia == "Aldoar"
+        assert freguesia == "Aldoar, Foz do Douro e Nevogilde"
 
-    def test_um_unico_nivel_e_so_concelho_sem_freguesia(self):
-        concelho, freguesia = scraper._concelho_e_freguesia(["Porto"])
-        assert concelho == "Porto"
-        assert freguesia is None
+    def test_freguesia_nao_reconhecida_deixa_concelho_none_mas_preserva_o_texto(self):
+        # "Camões - Faria Guimarães" é uma zona informal do idealista, não
+        # uma freguesia oficial — sem correspondência, o concelho fica
+        # desconhecido (não confia no último item da lista) mas o texto
+        # original da freguesia é preservado sem alteração.
+        concelho, freguesia = scraper._concelho_e_freguesia(["Rua X", "Camões - Faria Guimarães", "Porto"])
+        assert concelho is None
+        assert freguesia == "Camões - Faria Guimarães"
+
+    def test_um_unico_nivel_nao_tem_freguesia_para_deduzir_o_concelho(self):
+        # Regressão: com só 1 nível não há freguesia (penúltimo item)
+        # nenhuma pra consultar — o concelho não é mais assumido a partir do
+        # próprio item único (podia estar errado, como "Vila Nova de Gaia,
+        # Porto" concelho+distrito grudados).
+        assert scraper._concelho_e_freguesia(["Porto"]) == (None, None)
 
     def test_lista_vazia_devolve_none_para_ambos(self):
         assert scraper._concelho_e_freguesia([]) == (None, None)

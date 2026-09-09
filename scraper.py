@@ -6,6 +6,7 @@ from datetime import date
 from typing import Callable
 from playwright.async_api import async_playwright
 
+import divisoes_administrativas
 import geolocalizacao
 from classificacao import (
     analisar_fiador,
@@ -233,16 +234,23 @@ def parece_endereco_de_rua(texto: str) -> bool:
 def _concelho_e_freguesia(itens: list[str]) -> tuple[str | None, str | None]:
     """Deduz concelho e freguesia a partir da hierarquia de localização do idealista.
 
-    A lista vem do mais específico ao mais genérico e sempre termina no
-    concelho (cidade) — daí `itens[-1]`. O penúltimo item quase sempre é a
-    freguesia oficial (em cidades grandes, o idealista às vezes intercala uma
-    "zona" informal antes dela, então isso é uma aproximação best-effort, não
-    uma garantia). Sem pelo menos 2 níveis, não há freguesia identificável.
+    A freguesia é o penúltimo item da lista (do mais específico ao mais
+    genérico). O concelho **não** vem do último item — que às vezes é uma
+    string capenga tipo "Vila Nova de Gaia, Porto" (concelho e distrito
+    grudados, quando o anúncio não é da cidade do Porto) — e sim derivado da
+    freguesia pela divisão administrativa oficial
+    (`divisoes_administrativas.concelho_da_freguesia`), a fonte confiável.
+    Esse último item capenga ainda serve como pista de desempate quando a
+    freguesia é ambígua (existe em mais de um concelho): mesmo não sendo um
+    concelho "limpo", costuma conter o nome certo em algum lugar da string.
+    Sem uma freguesia reconhecida (ou ambígua mesmo com a pista), o concelho
+    fica `None` em vez de arriscar um valor errado.
     """
-    if not itens:
+    if not itens or len(itens) < 2:
         return None, None
-    concelho = itens[-1]
-    freguesia = itens[-2] if len(itens) > 1 else None
+    freguesia_bruta = itens[-2]
+    concelho = divisoes_administrativas.concelho_da_freguesia(freguesia_bruta, dica_cidade=itens[-1])
+    freguesia = divisoes_administrativas.canonicalizar_freguesia(freguesia_bruta) if concelho else freguesia_bruta
     return concelho, freguesia
 
 
@@ -268,16 +276,44 @@ async def extrair_localizacao_pagina(page, store: Storage) -> dict | None:
 
     texto = itens[0]
     concelho, freguesia = _concelho_e_freguesia(itens)
-    endereco_busca = f"{texto}, {concelho}, Portugal" if concelho else f"{texto}, Portugal"
+    preciso = parece_endereco_de_rua(texto)
+    coords = None
 
-    coords = await asyncio.to_thread(geolocalizacao.geocodificar_com_cache, endereco_busca, store)
+    if concelho:
+        # Com o concelho confirmado (via divisão administrativa oficial),
+        # verifica a cidade do resultado em vez de confiar cegamente no
+        # primeiro (ver docstring de `geolocalizacao.py` — nem busca
+        # estruturada nem livre, sozinhas, bastam). Pra um endereço de rua
+        # de verdade, tenta busca estruturada primeiro; se ela não confirmar
+        # nada (rua ambígua/desconhecida da Nominatim), ou se não havia
+        # endereço de rua pra começar, cai pra busca livre pela freguesia
+        # (nível já confiável) — a busca estruturada não reconhece um nome
+        # de freguesia com vírgulas como "rua".
+        if preciso:
+            coords = await asyncio.to_thread(
+                geolocalizacao.geocodificar_com_cache, texto, store, concelho, True
+            )
+        if not coords and freguesia:
+            coords = await asyncio.to_thread(
+                geolocalizacao.geocodificar_com_cache, freguesia, store, concelho, False
+            )
+            preciso = False
+    else:
+        # Concelho não identificado — cai para a busca livre de sempre,
+        # usando o último item da lista como pista de cidade (mesmo não
+        # sendo um concelho "limpo", ver `_concelho_e_freguesia`), sem a
+        # verificação de cidade (não há cidade confirmada pra verificar).
+        cidade_para_busca = itens[-1] if len(itens) > 1 else ""
+        endereco_busca = f"{texto}, {cidade_para_busca}, Portugal" if cidade_para_busca else f"{texto}, Portugal"
+        coords = await asyncio.to_thread(geolocalizacao.geocodificar_com_cache, endereco_busca, store)
+
     if not coords:
         return None
 
     return {
         "lat": coords[0],
         "lon": coords[1],
-        "preciso": parece_endereco_de_rua(texto),
+        "preciso": preciso,
         "texto": texto,
         "concelho": concelho,
         "freguesia": freguesia,
