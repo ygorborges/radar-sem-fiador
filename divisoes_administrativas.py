@@ -15,9 +15,9 @@ que cada site expõe é inconsistente:
 
 Em vez de confiar nesse campo, `concelho_da_freguesia` deriva o concelho
 correto a partir da freguesia, usando a divisão administrativa oficial
-pós-reorganização de 2013 (`concelhos_freguesias.json`: 306 concelhos, 3092
-freguesias — bate com o total oficial do país). Gerado a partir de
-https://gist.github.com/tomahock/a6c07dd255d04499d8336237e35a4827
+pós-reorganização de 2013 (`reference/concelhos_freguesias.json`: 306
+concelhos, 3092 freguesias — bate com o total oficial do país). Gerado a
+partir de https://gist.github.com/tomahock/a6c07dd255d04499d8336237e35a4827
 (distritos-concelhos-freguesias-Portugal.json, actualizado 2016-07-12),
 removendo o nível de distrito (não usado por este projeto) e o prefixo
 "União das freguesias de" de cada nome.
@@ -30,7 +30,7 @@ import unicodedata
 from pathlib import Path
 from typing import Optional
 
-_ARQUIVO = Path(__file__).resolve().parent / "concelhos_freguesias.json"
+_ARQUIVO = Path(__file__).resolve().parent / "reference" / "concelhos_freguesias.json"
 
 with _ARQUIVO.open("r", encoding="utf-8") as _f:
     CONCELHOS_FREGUESIAS: dict[str, list[str]] = json.load(_f)

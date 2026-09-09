@@ -1,5 +1,20 @@
+# Ambiente Python
 .venv/
 __pycache__/
 *.pyc
-data/
 .pytest_cache/
+
+# Dados gerados em runtime (ver storage.py) — nunca versionar dados reais do utilizador
+data/
+
+# Segredos/configuração local (nenhum em uso hoje, mas nunca versionar se surgir)
+.env
+.env.*
+
+# Editores/IDEs
+.vscode/
+.idea/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db

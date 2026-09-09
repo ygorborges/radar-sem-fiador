@@ -31,9 +31,10 @@ scraper.py                -> scraper do idealista.pt (navegação + extração e
 scraper_imovirtual.py     -> scraper do Imovirtual (navegação + extração específica do site)
 verificador_disponibilidade.py -> revisita anúncios já coletados: remove os que saíram do ar e preenche localização/descrição que faltem
 geolocalizacao.py         -> geocodificação (Nominatim/OpenStreetMap) usada só pelo idealista, com cache em disco
-divisoes_administrativas.py -> concelho/freguesia oficiais de Portugal (concelhos_freguesias.json), fonte confiável pro concelho de cada anúncio
+divisoes_administrativas.py -> concelho/freguesia oficiais de Portugal (reference/concelhos_freguesias.json), fonte confiável pro concelho de cada anúncio
 storage.py                -> persistência em JSON (config e resultados por fonte; histórico, favoritos e ocultos partilhados)
 static/                   -> interface (index.html, app.js, styles.css)
+reference/                -> dados estáticos versionados (concelhos_freguesias.json) — não confundir com data/, gerado em runtime
 data/                     -> ficheiros gerados em runtime (não versionados)
 tests/                    -> testes unitários e de integração (pytest)
 
@@ -68,6 +69,8 @@ Adicionar uma nova fonte (ex.: OLX) significa: uma entrada em `storage.FONTES`, 
 `<fonte>` é `idealista` ou `imovirtual`.
 
 ## Setup
+
+Requer Python 3.10+.
 
 ```bash
 python -m venv .venv
