@@ -37,12 +37,13 @@ static/                   -> interface (index.html, app.js, styles.css)
 data/                     -> ficheiros gerados em runtime (não versionados)
 tests/                    -> testes unitários e de integração (pytest)
 
-reclassificar.py            -> reaplica a classificação de fiador aos anúncios já guardados (sem reabrir páginas)
-corrigir_concelhos.py       -> corrige concelho/freguesia dos anúncios já guardados via divisoes_administrativas
-corrigir_geocodificacao.py  -> re-geocodifica o idealista com busca estruturada (rua + cidade), usando o concelho já corrigido
+scripts/                       -> scripts de manutenção (ver abaixo)
+scripts/reclassificar.py           -> reaplica a classificação de fiador aos anúncios já guardados (sem reabrir páginas)
+scripts/corrigir_concelhos.py      -> corrige concelho/freguesia dos anúncios já guardados via divisoes_administrativas
+scripts/corrigir_geocodificacao.py -> re-geocodifica o idealista com busca estruturada (rua + cidade), usando o concelho já corrigido
 ```
 
-Os três scripts acima (`reclassificar.py`, `corrigir_concelhos.py`, `corrigir_geocodificacao.py`) existem porque a descrição completa e a localização de cada anúncio já ficam guardadas — sempre que a lógica de classificação/localização é corrigida, dá pra reaplicá-la sobre o que já está em `data/` sem depender de uma nova varredura. Rode-os com `python <script>.py`.
+Os três scripts em `scripts/` existem porque a descrição completa e a localização de cada anúncio já ficam guardadas — sempre que a lógica de classificação/localização é corrigida, dá pra reaplicá-la sobre o que já está em `data/` sem depender de uma nova varredura. Rode-os a partir da raiz do projeto com `python scripts/<script>.py`.
 
 Adicionar uma nova fonte (ex.: OLX) significa: uma entrada em `storage.FONTES`, um módulo `scraper_olx.py` reaproveitando `classificacao.py`, e uma entrada em `scrape_runner.criar_job_managers_padrao` — a API e a interface já são genéricas por fonte e não precisam de mudanças estruturais.
 

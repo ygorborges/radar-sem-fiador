@@ -7,8 +7,15 @@ localização do idealista (que às vezes junta concelho e distrito numa única
 string, tipo "Vila Nova de Gaia, Porto"). Este script reprocessa o que já
 está em `data/` usando a divisão administrativa oficial — a freguesia já
 guardada é o suficiente, não precisa reabrir nenhuma página.
+
+Roda com `python scripts/corrigir_concelhos.py` a partir da raiz do projeto.
 """
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import divisoes_administrativas
 from storage import FONTES, Storage, default_storage

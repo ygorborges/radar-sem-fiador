@@ -14,8 +14,15 @@ site) — reaproveita o concelho já corrigido
 (`divisoes_administrativas`/`corrigir_concelhos.py`) como a cidade da busca.
 Bate direto na Nominatim (respeitando o limite de 1 pedido por segundo),
 sem precisar reabrir nenhuma página.
+
+Roda com `python scripts/corrigir_geocodificacao.py` a partir da raiz do projeto.
 """
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import geolocalizacao
 from storage import Storage, default_storage

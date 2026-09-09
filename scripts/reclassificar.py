@@ -5,8 +5,15 @@ falso positivo/negativo descoberto depois): como a descrição completa de
 cada anúncio já fica salva (ver `scraper.py`/`scraper_imovirtual.py`), dá
 pra reaplicar a classificação sobre o que já está em disco, sem reabrir
 nenhuma página nem esperar uma nova varredura.
+
+Roda com `python scripts/reclassificar.py` a partir da raiz do projeto.
 """
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from classificacao import analisar_fiador
 from storage import FONTES, Storage, default_storage
