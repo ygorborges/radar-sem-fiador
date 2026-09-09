@@ -39,7 +39,7 @@ def client(store, job_managers, check_managers):
 def test_index_serve_a_pagina_html(client):
     response = client.get("/")
     assert response.status_code == 200
-    assert b"Oportunidades de arrendamento" in response.data
+    assert b"RadarSemFiador" in response.data
 
 
 def test_get_results_vazio_inicialmente(client):

@@ -3,66 +3,99 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Oportunidades Idealista</title>
+  <title>RadarSemFiador</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <div class="container">
-    <h1>Oportunidades de arrendamento</h1>
+  <header class="app-header">
+    <div class="app-header-inner">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">📡</span>
+        <div class="brand-text">
+          <span class="brand-name">RadarSemFiador</span>
+          <span class="brand-tagline">Arrendamentos filtrados por exigência de fiador</span>
+        </div>
+      </div>
+      <nav class="header-actions">
+        <button id="toggleConfigBtn" class="toggle-btn" type="button" aria-expanded="false" aria-controls="configCollapsible">
+          <span aria-hidden="true">⚙️</span> Configurações de busca
+        </button>
+        <button id="toggleFiltersBtn" class="toggle-btn" type="button" aria-expanded="false" aria-controls="filtersCollapsible">
+          <span aria-hidden="true">🔎</span> Filtros
+        </button>
+      </nav>
+    </div>
+  </header>
 
-    <div id="fontesContainer" class="fontes-container"></div>
+  <main class="container">
+    <div id="configCollapsible" class="collapsible">
+      <div class="collapsible-inner">
+        <div id="fontesContainer" class="fontes-container"></div>
+      </div>
+    </div>
 
-    <div class="toolbar">
-      <div class="filters-row">
-        <span class="filter-group search-group">
-          <label for="searchInput">Buscar:</label>
-          <input id="searchInput" class="search-input" type="text" placeholder="palavra-chave no título ou na descrição..." />
-        </span>
-        <span class="filter-group">
-          <label for="fonteFilter">Fonte:</label>
-          <select id="fonteFilter"></select>
-        </span>
-        <span class="filter-group">
-          <label for="statusFilter">Filtrar por status de fiador:</label>
-          <select id="statusFilter"></select>
-        </span>
-        <span class="filter-group">
-          <label for="tipologiaFilter">Tipologia:</label>
-          <select id="tipologiaFilter"></select>
-        </span>
-        <span class="filter-group">
-          <label for="anuncianteFilter">Anunciante:</label>
-          <select id="anuncianteFilter"></select>
-        </span>
-        <span class="filter-group">
-          <label for="precoMinFilter">Preço (€):</label>
-          <input id="precoMinFilter" class="price-input" type="number" min="0" step="10" placeholder="mín." />
-          <span>–</span>
-          <input id="precoMaxFilter" class="price-input" type="number" min="0" step="10" placeholder="máx." />
-        </span>
-        <span class="filter-group">
-          <label for="sortOrder">Ordenar por:</label>
-          <select id="sortOrder">
-            <option value="padrao">Padrão</option>
-            <option value="data_desc">Data de atualização (mais recente)</option>
-            <option value="data_asc">Data de atualização (mais antiga)</option>
-          </select>
-        </span>
-        <label class="favoritos-only">
-          <input id="favoritosOnlyFilter" type="checkbox" />
-          Somente favoritos <span id="favoritosCount" class="count-badge"></span>
-        </label>
-        <label class="ocultos-only">
-          <input id="verOcultosFilter" type="checkbox" />
-          Ver ocultos <span id="ocultosCount" class="count-badge"></span>
-        </label>
-        <button id="refreshBtn" type="button">Atualizar</button>
+    <div id="filtersCollapsible" class="collapsible">
+      <div class="collapsible-inner">
+        <div class="toolbar">
+          <div class="filters-grid">
+            <div class="field field-wide">
+              <label for="searchInput">Buscar</label>
+              <input id="searchInput" type="text" placeholder="palavra-chave no título ou na descrição..." />
+            </div>
+            <div class="field">
+              <label for="fonteFilter">Fonte</label>
+              <select id="fonteFilter"></select>
+            </div>
+            <div class="field">
+              <label for="statusFilter">Status de fiador</label>
+              <select id="statusFilter"></select>
+            </div>
+            <div class="field">
+              <label for="tipologiaFilter">Tipologia</label>
+              <select id="tipologiaFilter"></select>
+            </div>
+            <div class="field">
+              <label for="anuncianteFilter">Anunciante</label>
+              <select id="anuncianteFilter"></select>
+            </div>
+            <div class="field">
+              <label for="precoMinFilter">Preço (€)</label>
+              <div class="price-range">
+                <input id="precoMinFilter" type="number" min="0" step="10" placeholder="mín." />
+                <span class="price-range-sep">–</span>
+                <input id="precoMaxFilter" type="number" min="0" step="10" placeholder="máx." />
+              </div>
+            </div>
+            <div class="field">
+              <label for="sortOrder">Ordenar por</label>
+              <select id="sortOrder">
+                <option value="padrao">Padrão</option>
+                <option value="data_desc">Atualização (mais recente)</option>
+                <option value="data_asc">Atualização (mais antiga)</option>
+              </select>
+            </div>
+          </div>
+          <div class="filters-footer">
+            <label class="switch-check">
+              <input id="favoritosOnlyFilter" type="checkbox" />
+              <span>Somente favoritos <span id="favoritosCount" class="count-badge"></span></span>
+            </label>
+            <label class="switch-check">
+              <input id="verOcultosFilter" type="checkbox" />
+              <span>Ver ocultos <span id="ocultosCount" class="count-badge"></span></span>
+            </label>
+            <button id="refreshBtn" class="primary refresh-btn" type="button">↻ Atualizar</button>
+          </div>
+        </div>
       </div>
     </div>
 
     <div id="summary" class="summary"></div>
     <div id="results" class="cards"></div>
-  </div>
+  </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 

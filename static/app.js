@@ -16,7 +16,37 @@ const els = {
   results: document.getElementById('results'),
   refreshBtn: document.getElementById('refreshBtn'),
   toast: document.getElementById('toast'),
+  toggleConfigBtn: document.getElementById('toggleConfigBtn'),
+  toggleFiltersBtn: document.getElementById('toggleFiltersBtn'),
 };
+
+function initCollapsible(wrapperId, btn, storageKey, defaultExpanded) {
+  const wrapper = document.getElementById(wrapperId);
+  let expanded = defaultExpanded;
+  try {
+    const salvo = localStorage.getItem(storageKey);
+    if (salvo !== null) expanded = salvo === '1';
+  } catch (error) {
+    // localStorage pode estar indisponível (ex.: modo privado); segue com o padrão.
+  }
+
+  const aplicar = () => {
+    wrapper.classList.toggle('expanded', expanded);
+    btn.classList.toggle('active', expanded);
+    btn.setAttribute('aria-expanded', String(expanded));
+  };
+  aplicar();
+
+  btn.addEventListener('click', () => {
+    expanded = !expanded;
+    aplicar();
+    try {
+      localStorage.setItem(storageKey, expanded ? '1' : '0');
+    } catch (error) {
+      // Sem persistência disponível: a preferência só vale para esta sessão.
+    }
+  });
+}
 
 let toastTimer = null;
 
@@ -196,13 +226,29 @@ function render() {
         </div>
       ` : ''}
       <h2 class="titulo">${item.titulo}</h2>
-      <div class="meta"><strong>Tipologia:</strong> ${item.tipologia || 'Indefinida'}</div>
-      <div class="meta"><strong>Anunciante:</strong> ${item.tipo_anunciante || 'Desconhecido'}</div>
-      <div class="meta"><strong>Preço:</strong> ${item.preco}</div>
-      <div class="meta"><strong>Atualizado em:</strong> ${formatarData(item.data_atualizacao)}</div>
-      <div class="meta"><strong>Link:</strong> <a href="${item.link}" target="_blank" rel="noreferrer">Abrir anúncio</a></div>
-      <div class="meta"><strong>Trecho decisivo:</strong> ${item.trecho_status || 'Sem trecho identificado'}</div>
+      <div class="meta-grid">
+        <div class="meta-item">
+          <span class="meta-label">Preço</span>
+          <span class="meta-value price">${item.preco}</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Tipologia</span>
+          <span class="meta-value">${item.tipologia || 'Indefinida'}</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Anunciante</span>
+          <span class="meta-value">${item.tipo_anunciante || 'Desconhecido'}</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Atualizado</span>
+          <span class="meta-value">${formatarData(item.data_atualizacao)}</span>
+        </div>
+      </div>
+      ${item.trecho_status ? `<blockquote class="trecho">${item.trecho_status}</blockquote>` : ''}
       <div class="descricao" title="Clique para expandir/recolher a descrição completa">${item.descricao}</div>
+      <div class="card-footer">
+        <a class="card-link" href="${item.link}" target="_blank" rel="noreferrer">Abrir anúncio ↗</a>
+      </div>
     </div>
   `).join('');
 
@@ -499,6 +545,9 @@ els.sortOrder.addEventListener('change', render);
 els.favoritosOnly.addEventListener('change', render);
 els.verOcultos.addEventListener('change', render);
 els.refreshBtn.addEventListener('click', fetchResults);
+
+initCollapsible('configCollapsible', els.toggleConfigBtn, 'radar_config_expanded', false);
+initCollapsible('filtersCollapsible', els.toggleFiltersBtn, 'radar_filters_expanded', false);
 
 (async () => {
   await fetchConfig();
