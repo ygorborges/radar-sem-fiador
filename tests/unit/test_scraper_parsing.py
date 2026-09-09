@@ -50,3 +50,29 @@ class TestPareceEnderecoDeRua:
     def test_texto_vazio_nao_e_rua(self):
         assert scraper.parece_endereco_de_rua("") is False
         assert scraper.parece_endereco_de_rua(None) is False
+
+
+class TestConcelhoEFreguesia:
+    def test_hierarquia_completa_rua_bairro_freguesia_concelho(self):
+        itens = [
+            "Rua de Faria Guimarães, 60",
+            "Camões - Faria Guimarães",
+            "Cedofeita - Santo Ildefonso - Sé - Miragaia - São Nicolau - Vitória",
+            "Porto",
+        ]
+        concelho, freguesia = scraper._concelho_e_freguesia(itens)
+        assert concelho == "Porto"
+        assert freguesia == "Cedofeita - Santo Ildefonso - Sé - Miragaia - São Nicolau - Vitória"
+
+    def test_hierarquia_curta_de_dois_niveis(self):
+        concelho, freguesia = scraper._concelho_e_freguesia(["Aldoar", "Porto"])
+        assert concelho == "Porto"
+        assert freguesia == "Aldoar"
+
+    def test_um_unico_nivel_e_so_concelho_sem_freguesia(self):
+        concelho, freguesia = scraper._concelho_e_freguesia(["Porto"])
+        assert concelho == "Porto"
+        assert freguesia is None
+
+    def test_lista_vazia_devolve_none_para_ambos(self):
+        assert scraper._concelho_e_freguesia([]) == (None, None)

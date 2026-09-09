@@ -154,6 +154,8 @@ class TestExtrairLocalizacaoDoJsonLd:
             "lon": -8.671025,
             "preciso": True,
             "texto": "Travessa Passos",
+            "concelho": "Porto",
+            "freguesia": "Aldoar, Foz do Douro e Nevogilde",
         }
 
     def test_sem_rua_usa_bairro_e_marca_como_impreciso(self):
@@ -166,6 +168,8 @@ class TestExtrairLocalizacaoDoJsonLd:
         resultado = si._extrair_localizacao_do_json_ld(self._documento(node))
         assert resultado["preciso"] is False
         assert resultado["texto"] == "Aldoar, Foz do Douro e Nevogilde"
+        assert resultado["concelho"] == "Porto"
+        assert resultado["freguesia"] == "Aldoar, Foz do Douro e Nevogilde"
 
     def test_sem_geo_retorna_none(self):
         node = self._no_produto(geo={})

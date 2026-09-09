@@ -9,11 +9,13 @@ alterado, então o scraper continua sem revisitar esse anúncio no futuro.
 
 A verificação em si (checar se a página indica que o anúncio acabou) é
 genérica entre fontes. Só uma coisa é específica por site: aproveitando que
-a página já está aberta mesmo, também preenchemos a localização (`lat`/`lon`
-pro mapa) de anúncios que ainda não têm — coletados antes dessa
-funcionalidade existir, ou cuja geocodificação falhou da primeira vez —
-reaproveitando as mesmas funções `extrair_localizacao_pagina` de cada
-scraper (ver `_EXTRATORES_LOCALIZACAO`).
+a página já está aberta mesmo, também preenchemos (ou completamos, se o
+formato mudou desde a última vez) a localização de anúncios que ainda não
+a têm por completo — coletados antes dessa funcionalidade existir, cuja
+geocodificação falhou da primeira vez, ou processados antes de um campo novo
+(ex.: concelho/freguesia) ser adicionado — reaproveitando as mesmas funções
+`extrair_localizacao_pagina` de cada scraper (ver `_EXTRATORES_LOCALIZACAO`
+e `_localizacao_incompleta`).
 """
 from __future__ import annotations
 
@@ -34,6 +36,20 @@ _EXTRATORES_LOCALIZACAO = {
     "idealista": scraper.extrair_localizacao_pagina,
     "imovirtual": scraper_imovirtual.extrair_localizacao_pagina,
 }
+
+
+def _localizacao_incompleta(item: dict) -> bool:
+    """Indica se falta preencher (ou completar) a localização de `item`.
+
+    Cobre tanto quem nunca teve `localizacao` quanto quem já teve, mas num
+    formato anterior a algum campo novo ter sido adicionado (ex.: `concelho`/
+    `freguesia`, adicionados depois do campo `lat`/`lon` já existir) — sem
+    isso, itens processados antes de uma mudança de esquema ficariam presos
+    no formato antigo para sempre, já que só reprocessamos quem "não tem"
+    localização.
+    """
+    localizacao = item.get("localizacao")
+    return not localizacao or "concelho" not in localizacao
 
 
 async def _anuncio_ainda_disponivel(page, url: str, store: Storage) -> bool:
@@ -112,7 +128,7 @@ async def verificar_disponibilidade(
                 store.log_mensagem(f"  -> Removido da lista (arrendado ou fora do ar): {link}")
                 store.remover_resultado(fonte, link)
                 removidos.append(item)
-            elif not item.get("localizacao"):
+            elif _localizacao_incompleta(item):
                 extrator = _EXTRATORES_LOCALIZACAO.get(fonte)
                 if extrator:
                     try:

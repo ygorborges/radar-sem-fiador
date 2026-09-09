@@ -2,6 +2,8 @@ const els = {
   fontesContainer: document.getElementById('fontesContainer'),
   searchInput: document.getElementById('searchInput'),
   fonteFilter: document.getElementById('fonteFilter'),
+  concelhoFilter: document.getElementById('concelhoFilter'),
+  freguesiaFilter: document.getElementById('freguesiaFilter'),
   statusFilter: document.getElementById('statusFilter'),
   tipologiaFilter: document.getElementById('tipologiaFilter'),
   anuncianteFilter: document.getElementById('anuncianteFilter'),
@@ -194,6 +196,8 @@ function parsePreco(precoStr) {
 function applyFilters(data) {
   const termoBusca = els.searchInput.value.trim().toLowerCase();
   const fonteSelected = els.fonteFilter.value || 'todas';
+  const concelhoSelected = els.concelhoFilter.value || 'todos';
+  const freguesiaSelected = els.freguesiaFilter.value || 'todas';
   const statusSelected = els.statusFilter.value || 'todos';
   const tipologiaSelected = els.tipologiaFilter.value || 'todas';
   const anuncianteSelected = els.anuncianteFilter.value || 'todos';
@@ -211,6 +215,11 @@ function applyFilters(data) {
       if (!textoPesquisavel.includes(termoBusca)) return false;
     }
     if (fonteSelected !== 'todas' && item.fonte !== fonteSelected) return false;
+    // Sem localização identificada, não há como confirmar concelho/freguesia
+    // — o anúncio fica de fora quando esses filtros estão ativos, mesma regra
+    // já usada para o filtro de preço quando o valor não foi reconhecido.
+    if (concelhoSelected !== 'todos' && (item.localizacao?.concelho || null) !== concelhoSelected) return false;
+    if (freguesiaSelected !== 'todas' && (item.localizacao?.freguesia || null) !== freguesiaSelected) return false;
     if (statusSelected !== 'todos' && item.status !== statusSelected) return false;
     if (tipologiaSelected !== 'todas' && normalizarTipologia(item.tipologia) !== tipologiaSelected) return false;
     if (anuncianteSelected !== 'todos' && (item.tipo_anunciante || 'Desconhecido') !== anuncianteSelected) return false;
@@ -372,6 +381,29 @@ async function toggleHidden(link) {
   }
 }
 
+function ordemAlfabetica(valores) {
+  return [...valores].sort((a, b) => a.localeCompare(b, 'pt'));
+}
+
+function concelhosDisponiveis() {
+  return cachedData.map(item => item.localizacao?.concelho).filter(Boolean);
+}
+
+function freguesiasDisponiveis() {
+  // A freguesia só faz sentido dentro do concelho escolhido — trocar o
+  // concelho sempre recalcula as opções pra não sobrar uma freguesia de
+  // outro concelho selecionada.
+  const concelhoSelecionado = els.concelhoFilter.value || 'todos';
+  return cachedData
+    .filter(item => concelhoSelecionado === 'todos' || item.localizacao?.concelho === concelhoSelecionado)
+    .map(item => item.localizacao?.freguesia)
+    .filter(Boolean);
+}
+
+function atualizarOpcoesDeFreguesia() {
+  fillSelect(els.freguesiaFilter, ordemAlfabetica([...new Set(freguesiasDisponiveis())]), 'Todas', 'todas');
+}
+
 async function fetchResults() {
   try {
     const response = await fetch('/api/results');
@@ -379,6 +411,8 @@ async function fetchResults() {
     cachedData = await response.json();
 
     fillSelect(els.fonteFilter, [...new Set(cachedData.map(i => i.fonte))], 'Todas', 'todas', rotuloFonte);
+    fillSelect(els.concelhoFilter, ordemAlfabetica([...new Set(concelhosDisponiveis())]), 'Todos', 'todos');
+    atualizarOpcoesDeFreguesia();
     fillSelect(els.statusFilter, [...new Set(cachedData.map(i => i.status))], 'Todos', 'todos');
     fillSelect(els.tipologiaFilter, [...new Set(cachedData.map(i => normalizarTipologia(i.tipologia)))], 'Todas', 'todas');
     fillSelect(els.anuncianteFilter, [...new Set(cachedData.map(i => i.tipo_anunciante || 'Desconhecido'))], 'Todos', 'todos');
@@ -606,6 +640,11 @@ els.fontesContainer.addEventListener('click', event => {
 
 els.searchInput.addEventListener('input', render);
 els.fonteFilter.addEventListener('change', render);
+els.concelhoFilter.addEventListener('change', () => {
+  atualizarOpcoesDeFreguesia();
+  render();
+});
+els.freguesiaFilter.addEventListener('change', render);
 els.statusFilter.addEventListener('change', render);
 els.tipologiaFilter.addEventListener('change', render);
 els.anuncianteFilter.addEventListener('change', render);

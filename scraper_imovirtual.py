@@ -139,7 +139,12 @@ def _extrair_do_json_ld(dados: dict) -> dict | None:
 
 
 def _extrair_localizacao_do_json_ld(dados: dict) -> dict | None:
-    """Lê `address`/`geo` do nó do anúncio no JSON-LD, quando presentes."""
+    """Lê `address`/`geo` do nó do anúncio no JSON-LD, quando presentes.
+
+    `addressRegion` é o concelho e `addressLocality` a freguesia — ambos já
+    vêm como divisões administrativas oficiais nesse schema, ao contrário do
+    idealista (onde são deduzidos por posição numa lista de texto livre).
+    """
     grafo = dados.get("@graph") if isinstance(dados, dict) else None
     if not isinstance(grafo, list):
         return None
@@ -162,7 +167,17 @@ def _extrair_localizacao_do_json_ld(dados: dict) -> dict | None:
         if not texto:
             continue
 
-        return {"lat": float(lat), "lon": float(lon), "preciso": bool(rua), "texto": texto}
+        concelho = str(endereco.get("addressRegion") or "").strip() or None
+        freguesia = bairro or None
+
+        return {
+            "lat": float(lat),
+            "lon": float(lon),
+            "preciso": bool(rua),
+            "texto": texto,
+            "concelho": concelho,
+            "freguesia": freguesia,
+        }
 
     return None
 

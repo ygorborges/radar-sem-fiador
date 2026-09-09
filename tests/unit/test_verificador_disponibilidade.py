@@ -13,7 +13,7 @@ import asyncio
 import pytest
 
 from storage import Storage
-from verificador_disponibilidade import _anuncio_ainda_disponivel
+from verificador_disponibilidade import _anuncio_ainda_disponivel, _localizacao_incompleta
 
 
 @pytest.fixture
@@ -60,3 +60,20 @@ class TestAnuncioAindaDisponivel:
         # indisponível.
         page = _PaginaFalsa(falha_no_goto=True)
         assert asyncio.run(_anuncio_ainda_disponivel(page, "https://a.pt/1", store)) is True
+
+
+class TestLocalizacaoIncompleta:
+    def test_sem_localizacao_e_incompleta(self):
+        assert _localizacao_incompleta({"link": "https://a.pt/1"}) is True
+
+    def test_localizacao_none_e_incompleta(self):
+        assert _localizacao_incompleta({"link": "https://a.pt/1", "localizacao": None}) is True
+
+    def test_localizacao_sem_concelho_e_incompleta(self):
+        # Formato salvo antes do campo `concelho`/`freguesia` existir.
+        item = {"localizacao": {"lat": 41.15, "lon": -8.61, "preciso": True, "texto": "Rua X"}}
+        assert _localizacao_incompleta(item) is True
+
+    def test_localizacao_completa_nao_e_incompleta(self):
+        item = {"localizacao": {"lat": 41.15, "lon": -8.61, "preciso": True, "texto": "Rua X", "concelho": "Porto", "freguesia": "Bonfim"}}
+        assert _localizacao_incompleta(item) is False

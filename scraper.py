@@ -230,6 +230,22 @@ def parece_endereco_de_rua(texto: str) -> bool:
     return texto_normalizado.startswith(_PREFIXOS_RUA)
 
 
+def _concelho_e_freguesia(itens: list[str]) -> tuple[str | None, str | None]:
+    """Deduz concelho e freguesia a partir da hierarquia de localização do idealista.
+
+    A lista vem do mais específico ao mais genérico e sempre termina no
+    concelho (cidade) — daí `itens[-1]`. O penúltimo item quase sempre é a
+    freguesia oficial (em cidades grandes, o idealista às vezes intercala uma
+    "zona" informal antes dela, então isso é uma aproximação best-effort, não
+    uma garantia). Sem pelo menos 2 níveis, não há freguesia identificável.
+    """
+    if not itens:
+        return None, None
+    concelho = itens[-1]
+    freguesia = itens[-2] if len(itens) > 1 else None
+    return concelho, freguesia
+
+
 async def extrair_localizacao_pagina(page, store: Storage) -> dict | None:
     """Lê a hierarquia de localização do idealista e geocodifica o nível mais específico.
 
@@ -251,14 +267,21 @@ async def extrair_localizacao_pagina(page, store: Storage) -> dict | None:
         return None
 
     texto = itens[0]
-    cidade = itens[-1] if len(itens) > 1 else ""
-    endereco_busca = f"{texto}, {cidade}, Portugal" if cidade else f"{texto}, Portugal"
+    concelho, freguesia = _concelho_e_freguesia(itens)
+    endereco_busca = f"{texto}, {concelho}, Portugal" if concelho else f"{texto}, Portugal"
 
     coords = await asyncio.to_thread(geolocalizacao.geocodificar_com_cache, endereco_busca, store)
     if not coords:
         return None
 
-    return {"lat": coords[0], "lon": coords[1], "preciso": parece_endereco_de_rua(texto), "texto": texto}
+    return {
+        "lat": coords[0],
+        "lon": coords[1],
+        "preciso": parece_endereco_de_rua(texto),
+        "texto": texto,
+        "concelho": concelho,
+        "freguesia": freguesia,
+    }
 
 
 async def extrair_proxima_pagina(page):
